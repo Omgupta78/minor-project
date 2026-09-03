@@ -1,0 +1,11 @@
+# Python virtual environment (machine-specific, large — never push)
+.venv/
+__pycache__/
+*.pyc
+
+# Attendance output (generated at runtime)
+attendance/
+
+# Local demo artifacts generated during testing
+test_faces.mp4
+preview.png

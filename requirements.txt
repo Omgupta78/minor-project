@@ -1,0 +1,5 @@
+dlib>=19.24.1
+face_recognition
+numpy
+opencv-python
+cmake
