@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Registered Students{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto flex flex-col gap-5">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-bold text-txt">Student Database</h1>
+      <p class="text-sm text-txt-m">Manage students registered for facial recognition</p>
+    </div>
+    <button onclick="document.getElementById('add-student-modal').style.display='flex'" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2 rounded-lg cursor-pointer flex items-center gap-2 transition-colors shadow-sm">
+      <span class="material-symbols-outlined text-[18px]">person_add</span>Add Student
+    </button>
+  </div>
+
+  <div class="bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
+    <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center">
+      <h3 class="font-semibold text-txt text-sm flex items-center gap-2">
+        <span class="material-symbols-outlined text-primary text-[18px]">face</span>Enrolled Profiles ({{ students|length }})
+      </h3>
+    </div>
+    
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
+      {% for s in students %}
+      <div class="border border-bdr rounded-xl p-4 hover:shadow-md transition-shadow flex flex-col items-center gap-3">
+        <div class="w-16 h-16 rounded-full overflow-hidden border-2 border-bdr bg-bg">
+          <img src="/static/faces/{{ s }}.jpg" alt="{{ s }}" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'%2394A3B8\'><path d=\'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z\'/></svg>'">
+        </div>
+        <div class="text-center">
+          <div class="font-semibold text-txt">{{ s }}</div>
+          <div class="text-[10px] font-mono text-txt-f">ID: CS-2024-{{ "%03d"|format(loop.index) }}</div>
+        </div>
+      </div>
+      {% endfor %}
+      
+      {% if not students %}
+      <div class="col-span-full p-8 text-center text-txt-m">
+        <p>No students registered yet. Add images to the <code>faces/</code> folder.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block modals %}
+{{ super() }}
+<!-- Add Student Modal -->
+<div id="add-student-modal" class="fixed inset-0 bg-black/40 z-[200] items-center justify-center backdrop-blur-sm" style="display:none;">
+  <div class="bg-white rounded-xl border border-bdr shadow-2xl w-full max-w-md overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-bdr bg-surface-el">
+      <span class="flex items-center gap-2 text-sm font-semibold text-txt">
+        <span class="material-symbols-outlined text-primary text-[18px]">person_add</span>Register New Face
+      </span>
+      <button onclick="document.getElementById('add-student-modal').style.display='none'" class="text-txt-m hover:text-txt transition-colors">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    
+    <div class="p-6">
+      <p class="text-sm text-txt-m mb-4">To add a new student, upload a clear photo of their face. Name the file with the student's full name (e.g., <code class="font-mono bg-bg px-1 rounded text-primary text-xs">John Doe.jpg</code>).</p>
+      
+      <form action="/add-student" method="POST" enctype="multipart/form-data" class="flex flex-col gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Student Name</label>
+          <input type="text" name="student_name" required placeholder="e.g. John Doe" class="w-full border-bdr rounded-lg px-3 py-2 text-sm focus:ring-primary focus:border-primary">
+        </div>
+        
+        <div>
+          <label class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Face Photo</label>
+          <input type="file" name="student_photo" accept="image/*" required class="w-full text-sm text-txt-m file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-light file:text-primary hover:file:bg-blue-100 cursor-pointer">
+        </div>
+        
+        <button type="submit" class="w-full bg-primary hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition-colors mt-2 shadow-sm">
+          Save Student
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

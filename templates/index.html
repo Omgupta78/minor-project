@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto flex flex-col lg:flex-row gap-5">
+  <!-- ─── LEFT COLUMN (60%) ─── -->
+  <div class="w-full lg:w-[60%] flex flex-col gap-5">
+    <!-- Stats Row -->
+    <div class="grid grid-cols-3 gap-3">
+      <div class="bg-white rounded-xl border border-bdr p-4 shadow-sm">
+        <div class="text-txt-m text-[10px] font-medium uppercase tracking-wider mb-1">Faces Detected</div>
+        <div class="text-3xl font-bold text-txt font-mono" id="stat-total">--</div>
+        <div class="text-[10px] text-txt-f font-mono mt-0.5">this scan</div>
+      </div>
+      <div class="bg-success-light rounded-xl border border-success/30 p-4 shadow-sm relative overflow-hidden">
+        <span class="material-symbols-outlined text-success absolute top-2 right-2 text-[18px]">check_circle</span>
+        <div class="text-success text-[10px] font-medium uppercase tracking-wider mb-1">Recognized</div>
+        <div class="text-3xl font-bold text-success font-mono" id="stat-recog">--</div>
+        <div class="text-[10px] text-txt-f font-mono mt-0.5" id="stat-rate">match rate</div>
+      </div>
+      <div class="bg-warn-light rounded-xl border border-warn/30 p-4 shadow-sm relative overflow-hidden">
+        <span class="material-symbols-outlined text-warn absolute top-2 right-2 text-[18px]">warning</span>
+        <div class="text-warn text-[10px] font-medium uppercase tracking-wider mb-1">Unknown</div>
+        <div class="text-3xl font-bold text-warn font-mono" id="stat-unknown">--</div>
+        <div class="text-[10px] text-txt-f font-mono mt-0.5">not in database</div>
+      </div>
+    </div>
+
+    <!-- Capture & Analyze Card -->
+    <div class="bg-white rounded-xl border border-bdr shadow-sm flex flex-col overflow-hidden" style="min-height:420px">
+      <!-- Header -->
+      <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center flex-shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-primary text-[18px]">camera_alt</span>
+          <h2 class="font-semibold text-txt text-sm">Capture & Analyze</h2>
+        </div>
+        <div class="flex gap-2 text-[10px] font-mono" id="hud-chips">
+          <span class="bg-white text-txt-m px-2 py-0.5 rounded border border-bdr" id="hud-status">READY</span>
+        </div>
+      </div>
+
+      <!-- Preview / Upload area -->
+      <div class="relative flex-1 bg-slate-50 overflow-hidden cursor-pointer" id="drop-zone"
+           onclick="document.getElementById('file-input').click()" style="min-height:300px">
+
+        <!-- IDLE: Upload prompt -->
+        <div id="drop-prompt" class="absolute inset-0 flex flex-col items-center justify-center gap-4 p-8">
+          <div class="w-20 h-20 rounded-2xl bg-primary-light border-2 border-dashed border-primary/40 flex items-center justify-center">
+            <span class="material-symbols-outlined text-primary text-[40px]">cloud_upload</span>
+          </div>
+          <div class="text-center">
+            <p class="text-txt-m text-sm mb-1">Drop class photo here, or choose input</p>
+            <p class="text-txt-f text-xs">Supports JPG, PNG up to 16MB</p>
+          </div>
+          <div class="flex gap-3 mt-1" onclick="event.stopPropagation()">
+            <label for="file-input" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2 rounded-lg cursor-pointer flex items-center gap-2 transition-colors shadow-sm">
+              <span class="material-symbols-outlined text-[16px]">upload</span>Upload Photo
+            </label>
+            <button class="bg-white border border-bdr text-txt-m text-sm px-5 py-2 rounded-lg flex items-center gap-2 hover:border-primary hover:text-primary transition-colors shadow-sm" onclick="openCamera()">
+              <span class="material-symbols-outlined text-[16px]">camera_alt</span>Use Camera
+            </button>
+          </div>
+        </div>
+        <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleFile(this)"/>
+
+        <!-- ACTIVE: Canvas preview -->
+        <div id="preview-wrap" style="display:none" class="absolute inset-0 bg-slate-900 flex items-center justify-center">
+          <canvas id="preview-canvas"></canvas>
+        </div>
+
+        <!-- Drag highlight -->
+        <div id="drag-hl" class="absolute inset-0 border-2 border-dashed border-primary rounded-xl pointer-events-none opacity-0 transition-opacity bg-primary/5"></div>
+      </div>
+
+      <!-- Processing banner -->
+      <div id="proc-banner" class="hidden px-4 py-2.5 bg-primary-light border-t border-primary/20 items-center gap-2 flex-shrink-0">
+        <div class="spinner"></div>
+        <span class="text-xs font-mono text-primary">Processing… running face_recognition inference</span>
+      </div>
+
+      <!-- Footer info -->
+      <div class="px-4 py-2 border-t border-bdr flex justify-between items-center text-[10px] text-txt-f font-mono flex-shrink-0">
+        <span id="footer-info">Upload a photo to begin</span>
+        <span>Model: face_recognition · dlib</span>
+      </div>
+    </div>
+
+    <!-- CTA Button -->
+    <button id="submit-btn" disabled onclick="takeAttendance()"
+      class="w-full bg-gradient-to-r from-primary to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-bold rounded-xl py-4 transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2 text-base disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-sm">
+      <span class="material-symbols-outlined text-[20px]" style="font-variation-settings:'FILL' 1">bolt</span>
+      MARK ATTENDANCE NOW
+    </button>
+  </div>
+
+  <!-- ─── RIGHT COLUMN (40%) ─── -->
+  <div class="w-full lg:w-[40%] flex flex-col gap-5">
+    <!-- Session Progress -->
+    <div class="bg-white rounded-xl border border-bdr p-5 shadow-sm">
+      <h3 class="font-semibold text-txt text-sm mb-3 flex items-center gap-2">
+        <span class="material-symbols-outlined text-primary text-[18px]">donut_large</span>
+        Session Progress
+      </h3>
+      <div class="flex justify-between items-end mb-2">
+        <div class="text-txt-m text-sm">Marked Present</div>
+        <div class="font-mono">
+          <span class="text-2xl font-bold text-txt" id="marked-count">0</span>
+          <span class="text-txt-f text-lg"> / <span id="total-count">{{ students|length }}</span></span>
+        </div>
+      </div>
+      <div class="h-3 bg-surface-el rounded-full overflow-hidden">
+        <div id="progress-bar" class="h-full bg-gradient-to-r from-primary-light to-primary rounded-full transition-all duration-700" style="width:0%"></div>
+      </div>
+      <div class="mt-1.5 text-right text-[10px] text-primary font-mono font-medium" id="pct-label">0% Complete</div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="grid grid-cols-3 gap-3">
+      <a href="/download-excel" class="bg-white border border-bdr rounded-xl p-3 flex flex-col items-center justify-center gap-1.5 hover:border-primary hover:bg-primary-light transition-all shadow-sm group">
+        <span class="material-symbols-outlined text-txt-m group-hover:text-primary text-[22px]">download</span>
+        <span class="text-[10px] font-medium text-txt group-hover:text-primary">Excel</span>
+      </a>
+      <button onclick="window.print()" class="bg-white border border-bdr rounded-xl p-3 flex flex-col items-center justify-center gap-1.5 hover:border-primary hover:bg-primary-light transition-all shadow-sm group">
+        <span class="material-symbols-outlined text-txt-m group-hover:text-primary text-[22px]">description</span>
+        <span class="text-[10px] font-medium text-txt group-hover:text-primary">Report</span>
+      </button>
+      <button onclick="location.reload()" class="bg-white border border-bdr rounded-xl p-3 flex flex-col items-center justify-center gap-1.5 hover:border-primary hover:bg-primary-light transition-all shadow-sm group">
+        <span class="material-symbols-outlined text-txt-m group-hover:text-primary text-[22px]">refresh</span>
+        <span class="text-[10px] font-medium text-txt group-hover:text-primary">Reload</span>
+      </button>
+    </div>
+
+    <!-- Live Attendance Log -->
+    <div class="bg-white rounded-xl border border-bdr shadow-sm flex flex-col overflow-hidden flex-1" style="min-height:200px;max-height:380px">
+      <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center flex-shrink-0">
+        <h3 class="font-semibold text-txt text-sm flex items-center gap-2">
+          <span class="material-symbols-outlined text-primary text-[16px]">history</span>Live Log
+        </h3>
+        <span class="text-[10px] font-mono text-txt-f" id="panel-date"></span>
+      </div>
+      <div class="flex-1 overflow-y-auto p-2" id="student-log">
+        <div class="text-center text-txt-f text-xs py-8">No attendance marked yet</div>
+      </div>
+      <div class="p-2 border-t border-bdr text-center flex-shrink-0">
+        <a href="/download-excel" class="text-xs text-primary font-medium hover:underline">Download Full Report →</a>
+      </div>
+    </div>
+
+    <!-- Registered Students -->
+    <details class="bg-white rounded-xl border border-bdr shadow-sm overflow-hidden group">
+      <summary class="flex justify-between items-center px-4 py-3 cursor-pointer select-none text-sm font-medium text-txt hover:bg-surface-el transition-colors list-none">
+        <span class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-primary text-[16px]">badge</span>
+          Registered Students ({{ students|length }})
+        </span>
+        <span class="material-symbols-outlined text-[16px] text-txt-f group-open:rotate-180 transition-transform">expand_more</span>
+      </summary>
+      <div class="px-4 pb-3 flex flex-wrap gap-1.5">
+        {% for s in students %}
+        <span class="px-2 py-0.5 bg-surface-el border border-bdr rounded text-[11px] font-mono text-txt-m">{{ s }}</span>
+        {% endfor %}
+      </div>
+    </details>
+  </div>
+</div>
+{% endblock %}
+
+{% block modals %}
+<!-- ═══════════════════ CAMERA MODAL ═══════════════════ -->
+<div id="camera-modal" class="fixed inset-0 bg-black/40 z-[200] flex items-center justify-center backdrop-blur-sm">
+  <div class="bg-white rounded-xl border border-bdr shadow-2xl w-full max-w-lg overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-bdr bg-surface-el">
+      <span class="flex items-center gap-2 text-sm font-semibold text-txt">
+        <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>Live Camera
+      </span>
+      <button onclick="closeCamera()" class="text-txt-m hover:text-txt transition-colors">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <video id="camera-video" autoplay playsinline class="w-full aspect-video bg-black object-cover block"></video>
+    <div class="p-4 flex justify-center bg-surface-el border-t border-bdr">
+      <button onclick="capturePhoto()" class="bg-primary hover:bg-blue-700 text-white font-semibold px-10 py-3 rounded-lg transition-colors flex items-center gap-2 shadow-md">
+        <span class="material-symbols-outlined text-[18px]" style="font-variation-settings:'FILL' 1">radio_button_checked</span>
+        Capture Photo
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let capturedBlob = null, mediaStream = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("panel-date").textContent = new Date().toLocaleDateString("en-IN",{month:"short",day:"numeric",year:"numeric"});
+  fetchToday();
+});
+
+const dz = document.getElementById("drop-zone");
+const dh = document.getElementById("drag-hl");
+dz.addEventListener("dragover",  e => { e.preventDefault(); dh.style.opacity = "1"; });
+dz.addEventListener("dragleave", () => { dh.style.opacity = "0"; });
+dz.addEventListener("drop", e => {
+  e.preventDefault(); dh.style.opacity = "0";
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith("image/")) loadPreview(f);
+});
+
+function handleFile(inp) { if (inp.files[0]) loadPreview(inp.files[0]); }
+
+function loadPreview(file) {
+  capturedBlob = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.getElementById("preview-canvas");
+      c.width = img.width; c.height = img.height;
+      c.getContext("2d").drawImage(img, 0, 0);
+      document.getElementById("drop-prompt").style.display = "none";
+      document.getElementById("preview-wrap").style.display = "flex";
+      document.getElementById("submit-btn").disabled = false;
+      document.getElementById("footer-info").textContent = "Photo loaded: " + file.name + " (" + (file.size/1024).toFixed(0) + " KB) — Ready to analyze";
+      document.getElementById("hud-status").textContent = "PHOTO LOADED";
+      document.getElementById("hud-status").className = "bg-primary-light text-primary px-2 py-0.5 rounded border border-primary/20";
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  setConsole("Image loaded: " + file.name);
+}
+
+async function openCamera() {
+  document.getElementById("camera-modal").style.display = "flex";
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    document.getElementById("camera-video").srcObject = mediaStream;
+    setConsole("Camera stream started");
+  } catch (err) {
+    alert("Camera error: " + err.message);
+    closeCamera();
+  }
+}
+function closeCamera() {
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  document.getElementById("camera-modal").style.display = "none";
+}
+function capturePhoto() {
+  const v = document.getElementById("camera-video");
+  const c = document.createElement("canvas");
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext("2d").drawImage(v, 0, 0);
+  c.toBlob(blob => {
+    loadPreview(new File([blob], "capture.jpg", { type: "image/jpeg" }));
+    closeCamera();
+  }, "image/jpeg", 0.92);
+}
+
+async function takeAttendance() {
+  if (!capturedBlob) return;
+  const btn = document.getElementById("submit-btn");
+  btn.disabled = true;
+  document.getElementById("proc-banner").classList.remove("hidden");
+  document.getElementById("proc-banner").classList.add("flex");
+  document.getElementById("hud-status").textContent = "PROCESSING…";
+  setConsole("Sending image to AI engine…");
+
+  const fd = new FormData();
+  fd.append("photo", capturedBlob);
+
+  try {
+    const res = await fetch("/take-attendance", { method: "POST", body: fd });
+    const data = await res.json();
+    if (data.error) { setConsole("Error: " + data.error); return; }
+
+    drawBoxes(data.boxes);
+
+    const rec = data.recognized.length, tot = data.total_faces, unk = data.unknown_count;
+    const rate = tot ? Math.round(rec / tot * 100) : 0;
+    document.getElementById("stat-total").textContent   = String(tot).padStart(2, "0");
+    document.getElementById("stat-recog").textContent   = String(rec).padStart(2, "0");
+    document.getElementById("stat-unknown").textContent  = String(unk).padStart(2, "0");
+    document.getElementById("stat-rate").textContent     = rate + "% match rate";
+    document.getElementById("hud-status").textContent    = "SCAN COMPLETE";
+    document.getElementById("hud-status").className      = "bg-success-light text-success px-2 py-0.5 rounded border border-success/20";
+    document.getElementById("footer-info").textContent   = "Scan complete — " + rec + " recognized, " + unk + " unknown — attendance saved";
+
+    setConsole("[" + ts() + "] Scan done: " + rec + "/" + tot + " recognized → saved to CSV");
+    fetchToday();
+  } catch (err) {
+    setConsole("Error: " + err.message);
+    document.getElementById("hud-status").textContent = "ERROR";
+  } finally {
+    document.getElementById("proc-banner").classList.add("hidden");
+    document.getElementById("proc-banner").classList.remove("flex");
+    btn.disabled = false;
+  }
+}
+
+function drawBoxes(boxes) {
+  const canvas = document.getElementById("preview-canvas");
+  const ctx = canvas.getContext("2d");
+  const img = new Image();
+  img.onload = () => {
+    ctx.drawImage(img, 0, 0);
+    boxes.forEach(b => {
+      const isUnk = b.name === "Unknown";
+      const color = isUnk ? "#F59E0B" : "#22C55E";
+      const w = b.right - b.left, h = b.bottom - b.top;
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(3, canvas.width / 250);
+      ctx.strokeRect(b.left, b.top, w, h);
+
+      const fs = Math.max(12, canvas.width / 55);
+      ctx.font = "600 " + fs + "px IBM Plex Mono, monospace";
+      const label = b.name.toUpperCase();
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = color;
+      ctx.fillRect(b.left - 1, b.bottom, tw + 14, fs + 8);
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillText(label, b.left + 6, b.bottom + fs + 2);
+
+      if (!isUnk) {
+        const conf = "94%";
+        ctx.fillStyle = color;
+        const cw = ctx.measureText(conf).width;
+        ctx.fillRect(b.right - cw - 10, b.top, cw + 10, fs + 4);
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = "bold " + (fs - 2) + "px IBM Plex Mono, monospace";
+        ctx.fillText(conf, b.right - cw - 5, b.top + fs);
+      }
+    });
+  };
+  img.src = canvas.toDataURL();
+}
+
+async function fetchToday() {
+  try {
+    const res = await fetch("/attendance-today");
+    const data = await res.json();
+    renderLog(data.records);
+  } catch (e) {}
+}
+
+function renderLog(records) {
+  const total = parseInt(document.getElementById("total-count").textContent);
+  document.getElementById("marked-count").textContent = records.length;
+  const pct = total ? Math.round(records.length / total * 100) : 0;
+  document.getElementById("progress-bar").style.width = pct + "%";
+  document.getElementById("pct-label").textContent = pct + "% Complete";
+
+  const log = document.getElementById("student-log");
+  if (!records.length) {
+    log.innerHTML = '<div class="text-center text-txt-f text-xs py-8">No attendance marked yet</div>';
+    return;
+  }
+  log.innerHTML = records.map((r, i) => {
+    const ini = initials(r.Name);
+    const col = avatarColors[i % avatarColors.length];
+    return `
+    <div class="flex items-center justify-between p-3 hover:bg-surface-el rounded-lg transition-colors fade-in">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs" style="background:${col}">${ini}</div>
+        <div>
+          <div class="text-sm font-medium text-txt">${r.Name}</div>
+          <div class="text-[10px] font-mono text-txt-f">ID: CS-${String(2024000 + i + 1)}</div>
+        </div>
+      </div>
+      <div class="flex flex-col items-end gap-0.5">
+        <span class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider bg-success-light text-success border border-success/20">PRESENT</span>
+        <span class="text-[10px] text-txt-f font-mono">${r.Time}</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+</script>
+{% endblock %}

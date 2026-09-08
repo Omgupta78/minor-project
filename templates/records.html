@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Class Records{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto flex flex-col gap-5">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-bold text-txt">Class Records</h1>
+      <p class="text-sm text-txt-m">View past attendance logs</p>
+    </div>
+    <a href="/download-excel" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2 rounded-lg cursor-pointer flex items-center gap-2 transition-colors shadow-sm">
+      <span class="material-symbols-outlined text-[18px]">download</span>Download All (Excel)
+    </a>
+  </div>
+
+  <div class="bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
+    <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center">
+      <h3 class="font-semibold text-txt text-sm flex items-center gap-2">
+        <span class="material-symbols-outlined text-primary text-[18px]">folder_open</span>Available Records
+      </h3>
+    </div>
+    
+    {% if csv_files %}
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
+      {% for file in csv_files %}
+      <div class="border border-bdr rounded-lg p-4 hover:border-primary transition-colors hover:shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-success">task_alt</span>
+            <span class="font-mono text-sm font-semibold text-txt">{{ file.date_str }}</span>
+          </div>
+          <span class="bg-primary-light text-primary text-xs font-mono px-2 py-0.5 rounded border border-primary/20">{{ file.count }} present</span>
+        </div>
+        <div class="text-xs text-txt-m">
+          File: <code class="font-mono bg-bg px-1 rounded">{{ file.filename }}</code>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="p-8 text-center text-txt-m">
+      <span class="material-symbols-outlined text-4xl mb-2 text-txt-f">inbox</span>
+      <p>No attendance records found.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

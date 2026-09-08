@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>FaceID Attendance - Review</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts: IBM Plex Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&amp;family=IBM+Plex+Sans:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {},
+            "borderRadius": {
+              "DEFAULT": "0.25rem",
+              "lg": "0.5rem",
+              "xl": "0.75rem",
+              "full": "9999px"
+            },
+            "spacing": {},
+            "fontFamily": {
+              "headline": [
+                "IBM Plex Sans"
+              ],
+              "display": [
+                "IBM Plex Sans"
+              ],
+              "body": [
+                "IBM Plex Sans"
+              ],
+              "label": [
+                "IBM Plex Sans"
+              ]
+            },
+            "fontSize": {}
+          },
+        },
+      }
+    </script>
+<style>
+      body {
+        font-family: 'IBM Plex Sans', sans-serif;
+        background-color: #F8FAFB;
+        color: #0F172A;
+      }
+      .font-mono {
+          font-family: 'IBM Plex Mono', monospace;
+      }
+    </style>
+</head>
+<body class="flex bg-[#F8FAFB]">
+<!-- SideNavBar (Shared Component) -->
+<aside class="fixed left-0 top-0 h-screen w-64 bg-[#F8FAFB] border-r border-[#E0E7EF] flex flex-col py-6 px-4 gap-2 z-20">
+<!-- Header -->
+<div class="flex items-center gap-3 px-2 mb-8">
+<div class="w-10 h-10 rounded-lg bg-[#1565C0] flex items-center justify-center text-white">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">face</span>
+</div>
+<div>
+<h1 class="text-lg font-bold text-[#0F172A] leading-tight">FaceID Attendance</h1>
+<p class="text-xs text-[#1565C0] font-medium">AI Recognition Active</p>
+</div>
+</div>
+<!-- Navigation Tabs -->
+<nav class="flex-1 flex flex-col gap-1 font-body text-label font-medium">
+<!-- Active Tab: Dashboard -->
+<a class="flex items-center gap-3 px-3 py-2 bg-[#E3F0FF] text-[#1565C0] rounded-lg font-bold transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+<span>Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-[#475569] hover:bg-[#F0F4F8] rounded-lg transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined">assignment</span>
+<span>Attendance Records</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-[#475569] hover:bg-[#F0F4F8] rounded-lg transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined">group</span>
+<span>Student Roster</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-[#475569] hover:bg-[#F0F4F8] rounded-lg transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined">face</span>
+<span>Face Database</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-[#475569] hover:bg-[#F0F4F8] rounded-lg transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined">memory</span>
+<span>AI Engine</span>
+</a>
+</nav>
+<!-- CTA -->
+<div class="mt-4 mb-4">
+<button class="w-full flex items-center justify-center gap-2 bg-[#1565C0] text-white py-2.5 px-4 rounded-lg font-semibold hover:bg-[#0D47A1] transition-colors">
+<span class="material-symbols-outlined" style="font-size: 20px;">camera_alt</span>
+                Take Attendance
+            </button>
+</div>
+<!-- Footer Tabs -->
+<div class="flex flex-col gap-1 pt-4 border-t border-[#E0E7EF] font-body text-label font-medium">
+<a class="flex items-center gap-3 px-3 py-2 text-[#475569] hover:bg-[#F0F4F8] rounded-lg transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined">help</span>
+<span>Support</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-[#475569] hover:bg-[#F0F4F8] rounded-lg transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined">logout</span>
+<span>Sign Out</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 ml-64 min-h-screen flex flex-col relative pb-24">
+<!-- TopNavBar (Shared Component) -->
+<header class="bg-white border-b border-[#E0E7EF] shadow-sm flex justify-between items-center h-16 px-6 w-full sticky top-0 z-10">
+<!-- Breadcrumbs / Left Side -->
+<div class="flex items-center gap-2 text-sm">
+<a class="text-[#475569] hover:text-[#1565C0] font-medium transition-colors" href="#">Dashboard</a>
+<span class="material-symbols-outlined text-[#94A3B8] text-sm">chevron_right</span>
+<a class="text-[#475569] hover:text-[#1565C0] font-medium transition-colors" href="#">Digital Electronics</a>
+<span class="material-symbols-outlined text-[#94A3B8] text-sm">chevron_right</span>
+<span class="text-[#0F172A] font-semibold">Attendance Review</span>
+</div>
+<!-- Right Actions -->
+<div class="flex items-center gap-4">
+<!-- Search Bar -->
+<div class="relative hidden md:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8] text-sm">search</span>
+<input class="pl-9 pr-4 py-1.5 bg-[#F0F4F8] border-none rounded-full text-sm focus:ring-2 focus:ring-[#1565C0] text-[#0F172A] placeholder-[#94A3B8] w-64" placeholder="Search students..." type="text"/>
+</div>
+<!-- Trailing Icons -->
+<button class="text-[#475569] hover:text-[#1565C0] transition-colors p-1 rounded-full hover:bg-[#F0F4F8]">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-[#475569] hover:text-[#1565C0] transition-colors p-1 rounded-full hover:bg-[#F0F4F8]">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<!-- Profile -->
+<div class="w-8 h-8 rounded-full overflow-hidden border border-[#E0E7EF]">
+<img alt="Administrator Profile" class="w-full h-full object-cover" data-alt="A small, professional portrait photograph of a young female school administrator wearing a navy blazer, smiling subtly, against a plain white background, capturing a clean and modern professional aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDIftrcSYhW_3ksZh9EcF4-dvhD6tcbaJCA5thCGOjLsn5w5n0WCCL0JH6Rk70WUjEXE4RxZB8Eu8VM_Ovvf_4XbJmd-WMOIqL6K0yaoEScSiQ63jjmiMWLdPPw9G31L5zOpcWtT1vEcfg9ePMp62xuy63v7uaYdStBd2dIWHTqYORWM4z2v6jEMZGLx7TFadIK2Sg0-qqNSv6WgA5OhBVA-_otzb64mrSnHpTalYeDFuVQBSQXmQTp_9f-zd-KrDw6pr6pzlGvx-KZ"/>
+</div>
+</div>
+</header>
+<!-- Page Content -->
+<div class="p-8 flex-1 max-w-7xl mx-auto w-full flex flex-col gap-6">
+<!-- Header Card -->
+<div class="bg-white rounded-xl border border-[#E0E7EF] p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+<div>
+<h2 class="text-2xl font-bold text-[#0F172A] font-headline">Review Attendance</h2>
+<p class="text-[#475569] mt-1 text-sm">Digital Electronics (ECE-A)</p>
+</div>
+<div class="flex items-center gap-2 bg-[#F0F4F8] px-4 py-2 rounded-lg border border-[#E0E7EF]">
+<span class="material-symbols-outlined text-[#1565C0] text-sm">calendar_today</span>
+<span class="font-mono text-sm font-medium text-[#0F172A]">05 Sep 2026</span>
+</div>
+</div>
+<!-- Metrics Bar (Bento style grid) -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<!-- Metric 1 -->
+<div class="bg-white rounded-xl border border-[#E0E7EF] p-5 shadow-sm flex items-start justify-between">
+<div>
+<p class="text-sm text-[#475569] font-medium mb-1">Total Enrolled</p>
+<p class="text-3xl font-bold text-[#0F172A] font-mono">60</p>
+</div>
+<div class="w-10 h-10 rounded-lg bg-[#F0F4F8] flex items-center justify-center text-[#475569]">
+<span class="material-symbols-outlined">group</span>
+</div>
+</div>
+<!-- Metric 2 -->
+<div class="bg-white rounded-xl border border-[#E0E7EF] p-5 shadow-sm flex items-start justify-between">
+<div>
+<p class="text-sm text-[#475569] font-medium mb-1">Detected in Photo</p>
+<p class="text-3xl font-bold text-[#1B8A3C] font-mono">54</p>
+</div>
+<div class="w-10 h-10 rounded-lg bg-[#E8F5EC] flex items-center justify-center text-[#1B8A3C]">
+<span class="material-symbols-outlined">face_retouching_natural</span>
+</div>
+</div>
+<!-- Metric 3 -->
+<div class="bg-white rounded-xl border border-[#B45309] p-5 shadow-sm flex items-start justify-between ring-1 ring-[#FEF3C7] relative overflow-hidden">
+<div class="absolute inset-0 bg-gradient-to-r from-transparent to-[#FEF3C7]/30 z-0"></div>
+<div class="relative z-10">
+<p class="text-sm text-[#B45309] font-bold mb-1">Action Required</p>
+<div class="flex gap-4 mt-2">
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-[#B45309]"></span>
+<span class="text-sm font-semibold text-[#0F172A]">1 Unknown</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-[#475569]"></span>
+<span class="text-sm font-semibold text-[#0F172A]">5 Absent</span>
+</div>
+</div>
+</div>
+<div class="w-10 h-10 rounded-lg bg-[#FEF3C7] flex items-center justify-center text-[#B45309] relative z-10">
+<span class="material-symbols-outlined">warning</span>
+</div>
+</div>
+</div>
+<!-- Review Table -->
+<div class="bg-white rounded-xl border border-[#E0E7EF] shadow-sm overflow-hidden flex-1 flex flex-col">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-[#F8FAFB] border-b border-[#E0E7EF] text-xs uppercase tracking-wider text-[#475569] font-semibold">
+<th class="py-3 px-6 w-16 text-center">Photo</th>
+<th class="py-3 px-6">Name</th>
+<th class="py-3 px-6">Roll No</th>
+<th class="py-3 px-6">AI Confidence</th>
+<th class="py-3 px-6 text-right">Status Override</th>
+</tr>
+</thead>
+<tbody class="text-sm text-[#0F172A]">
+<!-- Section: Action Required (Unknown Faces) -->
+<tr class="bg-[#FEF3C7]/30 border-b border-[#E0E7EF]">
+<td class="py-2 px-6 font-semibold text-[#B45309] text-xs uppercase tracking-wider" colspan="5">
+                                    Action Required: Unknown Faces (1)
+                                </td>
+</tr>
+<tr class="border-b border-[#E0E7EF] bg-[#FEF3C7]/10 hover:bg-[#F0F4F8] transition-colors group">
+<td class="py-3 px-6 text-center">
+<div class="w-10 h-10 rounded-full overflow-hidden border-2 border-[#F59E0B] mx-auto relative">
+<img alt="Unknown Face crop" class="w-full h-full object-cover" data-alt="A closely cropped, low resolution photo of a young male student's face, slightly blurred, captured by a classroom security camera. The lighting is harsh overhead fluorescent, highlighting a clean, white modern educational environment." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCoOYhhAqqJepWWGvRd5nIqq0QeO3FFJZua7hxFhDOHbq5AmA55vBVeqsvNXrrrIkgXxFrB3AAlcyoDBoRuDW0rd5A_kUMBOLTsuYqOP_VZH5SP6pizLfduCaztDscAe3Q93NqvXU9902zubm_3GWgA7SE6WK-nCDoYdBfU-aq6j2tyUgU-OBUxo5ZdUgbhyNZ-_D7GjCsKU6aG0rRVC6A2rYSEVeG0Ro9TIb6RePX85lbEurKDZPTcGNmxpxQFqxAsKvel9x7nbD7M"/>
+<div class="absolute inset-0 ring-2 ring-inset ring-[#F59E0B] rounded-full"></div>
+</div>
+</td>
+<td class="py-3 px-6 font-medium italic text-[#475569]">Unknown Face</td>
+<td class="py-3 px-6 font-mono text-[#94A3B8]">---</td>
+<td class="py-3 px-6">
+<span class="inline-flex items-center gap-1 text-[#B45309] font-medium bg-[#FEF3C7] px-2 py-0.5 rounded text-xs border border-[#FDE68A]">
+<span class="material-symbols-outlined text-[14px]">warning</span> Low
+                                    </span>
+</td>
+<td class="py-3 px-6 text-right">
+<div class="flex items-center justify-end gap-2">
+<div class="relative">
+<select class="appearance-none bg-white border border-[#E0E7EF] rounded-md py-1.5 pl-3 pr-8 text-sm focus:ring-[#1565C0] focus:border-[#1565C0] shadow-sm font-medium w-48">
+<option disabled="" selected="" value="">Assign student...</option>
+<option value="ignore">Ignore (Not a student)</option>
+<option value="1">Simran (ECE-A)</option>
+<option value="2">David K (ECE-A)</option>
+</select>
+<span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none text-sm">arrow_drop_down</span>
+</div>
+</div>
+</td>
+</tr>
+<!-- Section: Action Required (Absent/Not Detected) -->
+<tr class="bg-[#F8FAFB] border-b border-[#E0E7EF]">
+<td class="py-2 px-6 font-semibold text-[#475569] text-xs uppercase tracking-wider" colspan="5">
+                                    Action Required: Absent / Not Detected (5)
+                                </td>
+</tr>
+<tr class="border-b border-[#E0E7EF] hover:bg-[#F0F4F8] transition-colors">
+<td class="py-3 px-6 text-center">
+<div class="w-10 h-10 rounded-full bg-[#E0E7EF] mx-auto flex items-center justify-center text-[#94A3B8]">
+<span class="material-symbols-outlined">person_off</span>
+</div>
+</td>
+<td class="py-3 px-6 font-medium">Simran</td>
+<td class="py-3 px-6 font-mono text-[#475569]">ECE-2024-042</td>
+<td class="py-3 px-6">
+<span class="font-mono text-[#94A3B8] font-medium">0%</span>
+</td>
+<td class="py-3 px-6 text-right">
+<div class="flex items-center justify-end gap-3">
+<span class="text-sm font-medium text-[#475569]">Absent</span>
+<button class="w-11 h-6 bg-[#E0E7EF] rounded-full relative cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#1565C0] focus:ring-offset-1 transition-colors">
+<span class="absolute left-1 top-1 bg-white w-4 h-4 rounded-full shadow-sm transition-transform"></span>
+</button>
+<span class="text-sm font-medium text-[#94A3B8] w-12 text-left">Present</span>
+</div>
+</td>
+</tr>
+<!-- Collapsed representation of other 4 absentees -->
+<tr class="border-b border-[#E0E7EF] bg-[#F8FAFB]/50">
+<td class="py-2 px-6 text-center text-xs text-[#94A3B8] font-medium cursor-pointer hover:text-[#1565C0]" colspan="5">
+                                    + 4 more absent students
+                                </td>
+</tr>
+<!-- Section: Auto-Matched (Present) -->
+<tr class="bg-[#E8F5EC]/30 border-b border-[#E0E7EF]">
+<td class="py-2 px-6 font-semibold text-[#1B8A3C] text-xs uppercase tracking-wider" colspan="5">
+                                    Auto-Matched: Present (54)
+                                </td>
+</tr>
+<tr class="border-b border-[#E0E7EF] hover:bg-[#F0F4F8] transition-colors">
+<td class="py-3 px-6 text-center">
+<div class="w-10 h-10 rounded-full overflow-hidden border-2 border-[#22C55E] mx-auto">
+<img alt="John Smith" class="w-full h-full object-cover" data-alt="A small ID-style photograph of a young male student named John Smith, with short dark hair, wearing a casual grey t-shirt, smiling slightly. Bright, clean, white background, professional modern educational style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBkprXruCf_0mKQGroKrV6PmtkgVls0mXlLR4qEdziHyrqMRGnWpS3mnmgPENzyukhHBiSbQvaOPViBADyla0AhQAf7voVbzqsf0_AD8givYAE939DlOAVuN8ndVbXKJfCRxcYgswtLlhG8g9WKFmrlsi7LRxm2kPUWaTSi00r2JFoiVFkNLA82E8jUOviWwEc2mcAHBENZMqhsIR64ncR6dAajCJRAVPdO_FTUmA4SHI-hFe7TUlT8r0HmlRMlZH-vURRsMPFMejN5"/>
+</div>
+</td>
+<td class="py-3 px-6 font-medium">John Smith</td>
+<td class="py-3 px-6 font-mono text-[#475569]">ECE-2024-001</td>
+<td class="py-3 px-6">
+<span class="inline-flex items-center gap-1 text-[#1B8A3C] font-medium font-mono text-sm">
+                                        98.5%
+                                    </span>
+</td>
+<td class="py-3 px-6 text-right">
+<div class="flex items-center justify-end gap-3">
+<span class="text-sm font-medium text-[#94A3B8]">Absent</span>
+<button class="w-11 h-6 bg-[#1B8A3C] rounded-full relative cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#1565C0] focus:ring-offset-1 transition-colors">
+<span class="absolute left-1 top-1 bg-white w-4 h-4 rounded-full shadow-sm transition-transform translate-x-5"></span>
+</button>
+<span class="text-sm font-bold text-[#1B8A3C] w-12 text-left">Present</span>
+</div>
+</td>
+</tr>
+<tr class="border-b border-[#E0E7EF] hover:bg-[#F0F4F8] transition-colors bg-[#F8FAFB]">
+<td class="py-3 px-6 text-center">
+<div class="w-10 h-10 rounded-full overflow-hidden border-2 border-[#22C55E] mx-auto">
+<img alt="Alice Chen" class="w-full h-full object-cover" data-alt="A small ID-style photograph of a young female student named Alice Chen, with shoulder-length black hair, wearing a dark blue sweater. Bright, clean, white background, professional modern educational style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC1zeSFpNmxBieK4wnaffgbNWkHeZ-vEFo7BebXYfaS-Phb2MzYw2EOrkzlzmovY7TbMRvAtok0n7WbWaY_B88LtKgbVp-SpVn76UywFKhcaVCtkp-R7iD202khes-ZQURV5NKhbMbhOBiVUfChygxqrNIu1Lmx285WIZ-tkbXb8Ub9-wpGr-aB-zGmfb0rtU4DtlnXaHufXlbftWAR6ZYUf40ee2QC52aaXTHaODd4ruGSe3NzJj5cRdVn5U-9FzyKt2PJPqlQ5JDR"/>
+</div>
+</td>
+<td class="py-3 px-6 font-medium">Alice Chen</td>
+<td class="py-3 px-6 font-mono text-[#475569]">ECE-2024-002</td>
+<td class="py-3 px-6">
+<span class="inline-flex items-center gap-1 text-[#1B8A3C] font-medium font-mono text-sm">
+                                        99.1%
+                                    </span>
+</td>
+<td class="py-3 px-6 text-right">
+<div class="flex items-center justify-end gap-3">
+<span class="text-sm font-medium text-[#94A3B8]">Absent</span>
+<button class="w-11 h-6 bg-[#1B8A3C] rounded-full relative cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#1565C0] focus:ring-offset-1 transition-colors">
+<span class="absolute left-1 top-1 bg-white w-4 h-4 rounded-full shadow-sm transition-transform translate-x-5"></span>
+</button>
+<span class="text-sm font-bold text-[#1B8A3C] w-12 text-left">Present</span>
+</div>
+</td>
+</tr>
+<tr class="border-b border-[#E0E7EF] bg-[#F8FAFB]/50">
+<td class="py-3 px-6 text-center text-xs text-[#94A3B8] font-medium cursor-pointer hover:text-[#1565C0]" colspan="5">
+                                    Scroll to view remaining 52 students
+                                </td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Action Bar (Fixed) -->
+<div class="fixed bottom-0 left-64 right-0 bg-white border-t border-[#E0E7EF] p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20 flex justify-end items-center gap-4 px-8">
+<button class="px-6 py-2.5 rounded-lg border border-[#E0E7EF] text-[#475569] font-medium hover:bg-[#F0F4F8] transition-colors focus:ring-2 focus:ring-[#E0E7EF] focus:outline-none">
+            Cancel
+        </button>
+<button class="px-6 py-2.5 rounded-lg bg-[#1565C0] text-white font-semibold hover:bg-[#0D47A1] transition-colors shadow-sm focus:ring-2 focus:ring-[#1565C0] focus:ring-offset-2 focus:outline-none flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">check_circle</span>
+            Confirm &amp; Save Attendance
+        </button>
+</div>
+</body></html>

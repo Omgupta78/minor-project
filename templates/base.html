@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>FaceID Attendance | {% block title %}Dashboard{% endblock %}</title>
+<meta name="description" content="AI-powered face recognition classroom attendance system"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          "primary":       "#1565C0",
+          "primary-light": "#E3F0FF",
+          "surface":       "#FFFFFF",
+          "surface-el":    "#F0F4F8",
+          "bg":            "#F8FAFB",
+          "bdr":           "#E0E7EF",
+          "success":       "#16A34A",
+          "success-light": "#E8F5EC",
+          "warn":          "#D97706",
+          "warn-light":    "#FEF3C7",
+          "txt":           "#0F172A",
+          "txt-m":         "#475569",
+          "txt-f":         "#94A3B8",
+        },
+        fontFamily: {
+          sans:  ["IBM Plex Sans","sans-serif"],
+          mono:  ["IBM Plex Mono","monospace"],
+        },
+      },
+    },
+  }
+</script>
+<style>
+  body { background:#F8FAFB; color:#0F172A; }
+  .blink { animation:blink 1s step-end infinite; }
+  @keyframes blink { 50%{opacity:0} }
+  .fade-in { animation:fadeIn .3s ease; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+  .spinner { width:18px;height:18px;border:2px solid #E0E7EF;border-top-color:#1565C0;border-radius:50%;animation:spin .6s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  ::-webkit-scrollbar { width:5px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:#E0E7EF; border-radius:3px; }
+  #camera-modal { display:none; }
+  .drag-over { border-color:#1565C0 !important; background:#E3F0FF !important; }
+  #preview-canvas { width:100%;height:100%;object-fit:contain;display:block; }
+  .avatar-colors { --colors: #3B82F6 #8B5CF6 #EC4899 #F97316 #14B8A6 #EF4444 #6366F1 #10B981; }
+</style>
+{% block extra_head %}{% endblock %}
+</head>
+<body class="font-sans antialiased flex flex-col h-screen overflow-hidden">
+
+<!-- ═══════════════════ TOP NAV ═══════════════════ -->
+<nav class="bg-white sticky top-0 z-50 border-b border-bdr shadow-sm flex justify-between items-center px-6 h-14 w-full flex-shrink-0">
+  <div class="flex items-center gap-2">
+    <span class="material-symbols-outlined text-primary text-[26px]" style="font-variation-settings:'FILL' 1">face</span>
+    <span class="text-lg font-bold text-txt">FaceID Attendance</span>
+    <span class="text-[10px] font-mono text-primary bg-primary-light px-1.5 py-0.5 rounded border border-primary/20 ml-1">v2.0</span>
+  </div>
+  <div class="hidden md:flex gap-6 h-full items-end">
+    <a href="/" class="text-sm pb-3 transition-colors {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'dashboard' else 'text-txt-m hover:text-primary' }}">Dashboard</a>
+    <a href="/records" class="text-sm pb-3 transition-colors {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'records' else 'text-txt-m hover:text-primary' }}">Records</a>
+    <a href="/students_page" class="text-sm pb-3 transition-colors {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'students' else 'text-txt-m hover:text-primary' }}">Students</a>
+  </div>
+  <div class="flex items-center gap-3">
+    <div class="font-mono text-xs text-txt-m bg-surface-el border border-bdr px-2.5 py-1 rounded flex items-center gap-1.5">
+      <span class="material-symbols-outlined text-[14px]">schedule</span>
+      <span id="live-clock">--:--:--</span>
+    </div>
+    <div class="hidden sm:flex items-center gap-1 text-[10px] font-mono text-primary border border-primary/30 px-2 py-1 rounded bg-primary-light">
+      <span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span>AI Active
+    </div>
+    <a href="/download-excel" title="Download Excel" class="text-txt-m hover:text-primary transition-colors">
+      <span class="material-symbols-outlined text-[20px]">download</span>
+    </a>
+    <div class="w-7 h-7 rounded-full bg-primary text-white flex items-center justify-center text-[10px] font-bold">PR</div>
+  </div>
+</nav>
+
+<div class="flex flex-1 overflow-hidden">
+
+  <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+  <aside class="bg-surface-el fixed left-0 top-14 h-full w-60 border-r border-bdr hidden md:flex flex-col p-3 gap-1 z-40">
+    <!-- AI Engine card -->
+    <div class="mb-4 mt-1">
+      <div class="bg-white rounded-lg border border-bdr p-3 shadow-sm">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-9 h-9 rounded-lg bg-primary-light border border-primary/20 flex items-center justify-center">
+            <span class="material-symbols-outlined text-primary text-[20px]" style="font-variation-settings:'FILL' 1">memory</span>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-txt">AI Engine</div>
+            <div class="text-[10px] font-mono text-success flex items-center gap-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-success"></span>Active
+            </div>
+          </div>
+        </div>
+        <div class="h-1.5 bg-surface-el rounded-full overflow-hidden">
+          <div class="h-full bg-gradient-to-r from-primary-light to-primary rounded-full" style="width:94%"></div>
+        </div>
+        <div class="flex justify-between text-[9px] font-mono text-txt-f mt-1">
+          <span>ACCURACY</span><span class="text-primary font-medium">94.2%</span>
+        </div>
+      </div>
+    </div>
+    <!-- Nav -->
+    <a href="/" class="rounded-lg text-sm flex items-center gap-3 px-3 py-2 transition-all {{ 'bg-primary-light text-primary font-semibold' if active_page == 'dashboard' else 'text-txt-m hover:bg-white' }}">
+      <span class="material-symbols-outlined text-[18px]" {% if active_page == 'dashboard' %}style="font-variation-settings:'FILL' 1"{% endif %}>dashboard</span>Overview
+    </a>
+    <a href="/records" class="rounded-lg text-sm flex items-center gap-3 px-3 py-2 transition-all {{ 'bg-primary-light text-primary font-semibold' if active_page == 'records' else 'text-txt-m hover:bg-white' }}">
+      <span class="material-symbols-outlined text-[18px]" {% if active_page == 'records' %}style="font-variation-settings:'FILL' 1"{% endif %}>groups</span>Class Records
+    </a>
+    <a href="/students_page" class="rounded-lg text-sm flex items-center gap-3 px-3 py-2 transition-all {{ 'bg-primary-light text-primary font-semibold' if active_page == 'students' else 'text-txt-m hover:bg-white' }}">
+      <span class="material-symbols-outlined text-[18px]" {% if active_page == 'students' %}style="font-variation-settings:'FILL' 1"{% endif %}>face</span>Students ({{ students|length }})
+    </a>
+    <a href="#" class="text-txt-m hover:bg-white rounded-lg text-sm flex items-center gap-3 px-3 py-2 transition-all opacity-50 cursor-not-allowed">
+      <span class="material-symbols-outlined text-[18px]">analytics</span>Reports (Pro)
+    </a>
+    <a href="#" class="text-txt-m hover:bg-white rounded-lg text-sm flex items-center gap-3 px-3 py-2 transition-all opacity-50 cursor-not-allowed">
+      <span class="material-symbols-outlined text-[18px]">settings</span>Settings
+    </a>
+    <!-- Bottom stats -->
+    <div class="mt-auto pt-3 border-t border-bdr">
+      <div class="flex flex-col gap-1 text-[10px] font-mono text-txt-f px-1">
+        <div class="flex justify-between"><span>STUDENTS:</span><span class="text-txt">{{ students|length }}</span></div>
+        <div class="flex justify-between"><span>THRESHOLD:</span><span class="text-primary">≤ 0.50</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════ MAIN ═══════════════════ -->
+  <main class="flex-1 md:ml-60 bg-bg overflow-y-auto p-4 md:p-6 pb-16">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+{% block modals %}{% endblock %}
+
+<!-- ═══════════════════ BOTTOM STATUS BAR ═══════════════════ -->
+<footer class="bg-bg fixed bottom-0 right-0 left-0 md:left-60 border-t border-bdr flex justify-between items-center px-5 py-2 z-50 h-9">
+  <div class="font-mono text-[11px] text-txt-m flex items-center gap-1.5">
+    <span class="text-success">●</span>
+    <span id="console-text">sys@faceid:~$ python app.py — ready on localhost:5000</span>
+    <span class="inline-block w-1.5 h-3.5 bg-primary blink ml-0.5 align-middle"></span>
+  </div>
+  <div class="hidden sm:flex items-center gap-2 font-mono text-[9px] text-txt-f uppercase tracking-wider">
+    <span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">dlib</span>
+    <span>·</span>
+    <span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">opencv</span>
+    <span>·</span>
+    <span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">flask</span>
+  </div>
+</footer>
+
+<script>
+  // Shared global JS
+  const avatarColors = ['#3B82F6','#8B5CF6','#EC4899','#F97316','#14B8A6','#EF4444','#6366F1','#10B981'];
+  document.addEventListener("DOMContentLoaded", () => {
+    const tick = () => { document.getElementById("live-clock").textContent = new Date().toLocaleTimeString("en-IN",{hour12:false}); };
+    tick(); setInterval(tick, 1000);
+  });
+  function setConsole(msg) { document.getElementById("console-text").textContent = msg; }
+  function ts() { return new Date().toLocaleTimeString("en-IN", { hour12: false }); }
+  function initials(name) { return name.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase(); }
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
