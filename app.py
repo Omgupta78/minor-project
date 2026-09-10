@@ -46,7 +46,9 @@ BASE_DIR = Path(__file__).resolve().parent
 FACES_DIR = Path(os.environ.get("FACES_DIR", BASE_DIR / "faces"))
 FACES_DIR.mkdir(parents=True, exist_ok=True)
 
-ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+# Kept in sync with the recognition core so the upload form can never reject a
+# format the scanner would happily read (that mismatch is what blocked HEIC).
+ALLOWED_EXTS = set(recognition.IMAGE_EXTS)
 
 # A session can be built from several photos (left half, right half, back row).
 # Capped so one request cannot tie up the CPU for minutes on end.
@@ -216,23 +218,31 @@ def add_student():
 
     ext = Path(photo.filename).suffix.lower()
     if ext not in ALLOWED_EXTS:
-        flash(f"Unsupported image type '{ext}'. Use JPG, PNG or WEBP.", "error")
+        flash(
+            f"Unsupported image type '{ext}'. Use JPG, PNG, WEBP or HEIC.",
+            "error",
+        )
+        return redirect(url_for("students_page", class_id=class_id))
+    if ext in recognition.HEIF_EXTS and not recognition.register_heif():
+        flash(
+            "HEIC photos need the pillow-heif package. Run "
+            "'pip install pillow-heif' in your virtual environment, or convert "
+            "the photo to JPG first.",
+            "error",
+        )
         return redirect(url_for("students_page", class_id=class_id))
 
     filename = f"{safe_stem(roll_no)}_{safe_stem(name)}.jpg"
     target = FACES_DIR / filename
 
-    # Normalise to JPEG (handles HEIC from iPhones when pillow-heif is present).
+    # Everything is stored as JPEG, whatever the teacher uploaded. HEIC from an
+    # iPhone is decoded here once, so the rest of the app never sees it again.
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps
 
-        try:
-            import pillow_heif
-
-            pillow_heif.register_heif_opener()
-        except Exception:
-            pass
+        recognition.register_heif()
         image = Image.open(photo.stream)
+        image = ImageOps.exif_transpose(image)  # honour the phone's rotation flag
         if image.mode not in ("RGB", "L"):
             image = image.convert("RGB")
         image.thumbnail((1200, 1200))
@@ -322,7 +332,7 @@ def _images_from_request() -> tuple[list[tuple[str, object]], list[str]]:
 
     Returns (images, skipped) so the caller can still scan the good photos and
     tell the teacher which files were unreadable, rather than failing the whole
-    batch because one file was a HEIC or a PDF.
+    batch because one file was unreadable.
     """
     images: list[tuple[str, object]] = []
     skipped: list[str] = []
