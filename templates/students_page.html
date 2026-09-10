@@ -1,82 +1,183 @@
 {% extends "base.html" %}
-
-{% block title %}Registered Students{% endblock %}
+{% block title %}Students{% endblock %}
 
 {% block content %}
 <div class="max-w-6xl mx-auto flex flex-col gap-5">
-  <div class="flex items-center justify-between">
+
+  <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
       <h1 class="text-xl font-bold text-txt">Student Database</h1>
-      <p class="text-sm text-txt-m">Manage students registered for facial recognition</p>
+      <p class="text-sm text-txt-m">One clear, front-facing photo per student is all the system needs.</p>
     </div>
-    <button onclick="document.getElementById('add-student-modal').style.display='flex'" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2 rounded-lg cursor-pointer flex items-center gap-2 transition-colors shadow-sm">
-      <span class="material-symbols-outlined text-[18px]">person_add</span>Add Student
-    </button>
+    <div class="flex flex-wrap gap-2">
+      <button onclick="document.getElementById('add-class-modal').style.display='flex'"
+              class="bg-white border border-bdr text-txt-m hover:border-primary hover:text-primary font-medium text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-sm">
+        <span class="material-symbols-outlined text-[18px]">library_add</span>New Class
+      </button>
+      <button onclick="document.getElementById('add-student-modal').style.display='flex'"
+              {% if not classes %}disabled title="Create a class first"{% endif %}
+              class="bg-primary hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-sm">
+        <span class="material-symbols-outlined text-[18px]">person_add</span>Add Student
+      </button>
+    </div>
   </div>
 
+  <!-- Class filter -->
+  {% if classes %}
+  <div class="flex flex-wrap gap-2">
+    <a href="/students_page" class="text-xs px-3 py-1.5 rounded-lg border transition-colors {{ 'bg-primary text-white border-primary' if not class_id else 'bg-white text-txt-m border-bdr hover:border-primary' }}">All ({{ student_total }})</a>
+    {% for c in classes %}
+    <a href="/students_page?class_id={{ c.id }}" class="text-xs px-3 py-1.5 rounded-lg border transition-colors {{ 'bg-primary text-white border-primary' if class_id == c.id else 'bg-white text-txt-m border-bdr hover:border-primary' }}">
+      {{ c.name }}{% if c.subject %} · {{ c.subject }}{% endif %} ({{ c.student_count }})
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Roster -->
   <div class="bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
     <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center">
       <h3 class="font-semibold text-txt text-sm flex items-center gap-2">
-        <span class="material-symbols-outlined text-primary text-[18px]">face</span>Enrolled Profiles ({{ students|length }})
+        <span class="material-symbols-outlined text-primary text-[18px]">badge</span>Enrolled Students ({{ students|length }})
       </h3>
     </div>
-    
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
-      {% for s in students %}
-      <div class="border border-bdr rounded-xl p-4 hover:shadow-md transition-shadow flex flex-col items-center gap-3">
-        <div class="w-16 h-16 rounded-full overflow-hidden border-2 border-bdr bg-bg">
-          <img src="/static/faces/{{ s }}.jpg" alt="{{ s }}" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'%2394A3B8\'><path d=\'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z\'/></svg>'">
-        </div>
-        <div class="text-center">
-          <div class="font-semibold text-txt">{{ s }}</div>
-          <div class="text-[10px] font-mono text-txt-f">ID: CS-2024-{{ "%03d"|format(loop.index) }}</div>
-        </div>
-      </div>
-      {% endfor %}
-      
-      {% if not students %}
-      <div class="col-span-full p-8 text-center text-txt-m">
-        <p>No students registered yet. Add images to the <code>faces/</code> folder.</p>
-      </div>
-      {% endif %}
+
+    {% if students %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm min-w-[640px]">
+        <thead>
+          <tr class="text-left text-[10px] uppercase tracking-wider text-txt-m border-b border-bdr">
+            <th class="px-4 py-2.5 font-semibold">Photo</th>
+            <th class="px-4 py-2.5 font-semibold">Roll No</th>
+            <th class="px-4 py-2.5 font-semibold">Name</th>
+            <th class="px-4 py-2.5 font-semibold">Class</th>
+            <th class="px-4 py-2.5 font-semibold text-center">Face Data</th>
+            <th class="px-4 py-2.5 font-semibold text-center">Attendance</th>
+            <th class="px-4 py-2.5"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in students %}
+          {% set stat = summary.get(s.id) %}
+          <tr class="border-b border-bdr last:border-0 hover:bg-surface-el/60 transition-colors">
+            <td class="px-4 py-2.5">
+              <div class="w-9 h-9 rounded-full overflow-hidden border border-bdr bg-surface-el flex items-center justify-center">
+                <img src="/face/{{ s.id }}" alt="" class="w-full h-full object-cover"
+                     onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'material-symbols-outlined text-txt-f text-[20px]',textContent:'person'}))"/>
+              </div>
+            </td>
+            <td class="px-4 py-2.5 font-mono text-xs text-txt-m">{{ s.roll_no }}</td>
+            <td class="px-4 py-2.5 font-medium text-txt">{{ s.name }}</td>
+            <td class="px-4 py-2.5 text-xs text-txt-m">{{ s.class_name or '—' }}</td>
+            <td class="px-4 py-2.5 text-center">
+              {% if s.has_encoding %}
+              <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-success-light text-success border border-success/20">READY</span>
+              {% else %}
+              <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-warn-light text-warn border border-warn/20">NO FACE</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-center">
+              {% if stat and stat.held %}
+              <span class="font-mono text-xs font-bold {{ 'text-danger' if stat.defaulter else 'text-success' }}">{{ stat.percent }}%</span>
+              <span class="block text-[10px] text-txt-f font-mono">{{ stat.present }}/{{ stat.held }}</span>
+              {% else %}
+              <span class="text-[10px] text-txt-f font-mono">no data</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-right">
+              <form method="POST" action="/students/{{ s.id }}/delete" onsubmit="return confirm('Remove {{ s.name }} and all their attendance records?')">
+                <button type="submit" class="text-txt-f hover:text-danger transition-colors p-1" aria-label="Remove {{ s.name }}">
+                  <span class="material-symbols-outlined text-[18px]">delete</span>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
+    {% else %}
+    <div class="p-10 text-center">
+      <span class="material-symbols-outlined text-txt-f text-[40px]">person_off</span>
+      <p class="text-sm text-txt-m mt-2">No students yet.</p>
+      <p class="text-xs text-txt-f mt-1">
+        {% if classes %}Add students one by one, or run
+        <code class="font-mono bg-bg px-1 rounded text-primary">python migrate_to_db.py</code>
+        to import an existing <code class="font-mono bg-bg px-1 rounded">faces/</code> folder.
+        {% else %}Create a class first.{% endif %}
+      </p>
+    </div>
+    {% endif %}
   </div>
+
+  <p class="text-[11px] text-txt-f text-center px-4">
+    Face photos and attendance records are personal data. They stay on this machine and are excluded from version control.
+  </p>
 </div>
 {% endblock %}
 
 {% block modals %}
-{{ super() }}
-<!-- Add Student Modal -->
-<div id="add-student-modal" class="fixed inset-0 bg-black/40 z-[200] items-center justify-center backdrop-blur-sm" style="display:none;">
+<!-- Add class -->
+<div id="add-class-modal" class="fixed inset-0 bg-black/40 z-[200] items-center justify-center backdrop-blur-sm p-4">
   <div class="bg-white rounded-xl border border-bdr shadow-2xl w-full max-w-md overflow-hidden">
     <div class="flex items-center justify-between px-5 py-3 border-b border-bdr bg-surface-el">
-      <span class="flex items-center gap-2 text-sm font-semibold text-txt">
-        <span class="material-symbols-outlined text-primary text-[18px]">person_add</span>Register New Face
-      </span>
-      <button onclick="document.getElementById('add-student-modal').style.display='none'" class="text-txt-m hover:text-txt transition-colors">
+      <span class="text-sm font-semibold text-txt">New Class</span>
+      <button onclick="document.getElementById('add-class-modal').style.display='none'" class="text-txt-m hover:text-txt" aria-label="Close">
         <span class="material-symbols-outlined">close</span>
       </button>
     </div>
-    
-    <div class="p-6">
-      <p class="text-sm text-txt-m mb-4">To add a new student, upload a clear photo of their face. Name the file with the student's full name (e.g., <code class="font-mono bg-bg px-1 rounded text-primary text-xs">John Doe.jpg</code>).</p>
-      
-      <form action="/add-student" method="POST" enctype="multipart/form-data" class="flex flex-col gap-4">
-        <div>
-          <label class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Student Name</label>
-          <input type="text" name="student_name" required placeholder="e.g. John Doe" class="w-full border-bdr rounded-lg px-3 py-2 text-sm focus:ring-primary focus:border-primary">
-        </div>
-        
-        <div>
-          <label class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Face Photo</label>
-          <input type="file" name="student_photo" accept="image/*" required class="w-full text-sm text-txt-m file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-light file:text-primary hover:file:bg-blue-100 cursor-pointer">
-        </div>
-        
-        <button type="submit" class="w-full bg-primary hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition-colors mt-2 shadow-sm">
-          Save Student
-        </button>
-      </form>
+    <form action="/classes/add" method="POST" class="p-6 flex flex-col gap-4">
+      <div>
+        <label for="c-name" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Class / Section</label>
+        <input id="c-name" type="text" name="name" required placeholder="e.g. CSE 3rd Year A" class="w-full border-bdr rounded-lg px-3 py-2 text-sm focus:ring-primary focus:border-primary"/>
+      </div>
+      <div>
+        <label for="c-sub" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Subject <span class="text-txt-f normal-case">(optional)</span></label>
+        <input id="c-sub" type="text" name="subject" placeholder="e.g. DBMS" class="w-full border-bdr rounded-lg px-3 py-2 text-sm focus:ring-primary focus:border-primary"/>
+      </div>
+      <button type="submit" class="w-full bg-primary hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition-colors">Create Class</button>
+    </form>
+  </div>
+</div>
+
+<!-- Add student -->
+<div id="add-student-modal" class="fixed inset-0 bg-black/40 z-[200] items-center justify-center backdrop-blur-sm p-4">
+  <div class="bg-white rounded-xl border border-bdr shadow-2xl w-full max-w-md overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-bdr bg-surface-el">
+      <span class="flex items-center gap-2 text-sm font-semibold text-txt">
+        <span class="material-symbols-outlined text-primary text-[18px]">person_add</span>Register Student
+      </span>
+      <button onclick="document.getElementById('add-student-modal').style.display='none'" class="text-txt-m hover:text-txt" aria-label="Close">
+        <span class="material-symbols-outlined">close</span>
+      </button>
     </div>
+    <form action="/add-student" method="POST" enctype="multipart/form-data" class="p-6 flex flex-col gap-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="s-roll" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Roll No</label>
+          <input id="s-roll" type="text" name="roll_no" required placeholder="CS-001" class="w-full border-bdr rounded-lg px-3 py-2 text-sm font-mono focus:ring-primary focus:border-primary"/>
+        </div>
+        <div>
+          <label for="s-class" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Class</label>
+          <select id="s-class" name="class_id" class="w-full border-bdr rounded-lg px-3 py-2 text-sm focus:ring-primary focus:border-primary">
+            {% for c in classes %}
+            <option value="{{ c.id }}" {{ 'selected' if c.id == class_id }}>{{ c.name }}{% if c.subject %} · {{ c.subject }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div>
+        <label for="s-name" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Full Name</label>
+        <input id="s-name" type="text" name="student_name" required placeholder="e.g. Ravi Kumar" class="w-full border-bdr rounded-lg px-3 py-2 text-sm focus:ring-primary focus:border-primary"/>
+      </div>
+      <div>
+        <label for="s-photo" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Face Photo</label>
+        <input id="s-photo" type="file" name="student_photo" accept="image/*" required
+               class="w-full text-sm text-txt-m file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-light file:text-primary hover:file:bg-blue-100 cursor-pointer"/>
+        <p class="text-[11px] text-txt-f mt-1.5">The upload is rejected if no face can be detected, so a student is never enrolled with unusable data.</p>
+      </div>
+      <button type="submit" class="w-full bg-primary hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition-colors">Save Student</button>
+    </form>
   </div>
 </div>
 {% endblock %}
