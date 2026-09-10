@@ -1,7 +1,23 @@
-dlib>=19.24.1
-face_recognition
-numpy
-opencv-python
-cmake
-flask>=3.0
-openpyxl>=3.1
+# Face Recognition Attendance System
+# Python 3.10 - 3.12 recommended (dlib wheels are easiest there).
+
+# --- web app ---
+Flask>=3.0.0
+Werkzeug>=3.0.0
+
+# --- face recognition ---
+# dlib must build before face_recognition. On Windows install
+# "Visual Studio Build Tools -> Desktop development with C++" first,
+# or use: pip install dlib-bin
+face_recognition>=1.3.0
+face-recognition-models>=0.3.0
+dlib>=19.24.0
+
+# --- imaging / maths ---
+opencv-python>=4.8.0
+numpy>=1.24.0,<2.0.0
+Pillow>=10.0.0
+pillow-heif>=0.13.0   # lets teachers upload iPhone HEIC photos
+
+# --- excel report ---
+openpyxl>=3.1.0

@@ -1,11 +1,37 @@
-# Python virtual environment (machine-specific, large — never push)
-.venv/
-__pycache__/
-*.pyc
-
-# Attendance output (generated at runtime)
+# ---------------------------------------------------------------------------
+# Personal data - NEVER commit these.
+# faces/ holds students' biometric photos and the database holds their
+# attendance records. Both are personal data and must stay off GitHub.
+# ---------------------------------------------------------------------------
+faces/*
+!faces/.gitkeep
+instance/
+*.db
+*.db-wal
+*.db-shm
 attendance/
+uploads/
+session_photos/
 
-# Local demo artifacts generated during testing
-test_faces.mp4
-preview.png
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Secrets / config
+.env
+.env.*
+
+# Generated reports
+*.xlsx
+!docs/*.xlsx
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

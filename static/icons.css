@@ -1,0 +1,32 @@
+/* Sizing and graceful degradation for the offline icon set (see icons.js).
+ *
+ * Icon elements are written as <span class="material-symbols-outlined">name</span>.
+ * Before icons.js swaps in an SVG that span still contains the literal word,
+ * so it is kept hidden but at full size. The slot never collapses, which means
+ * the layout does not jump when the icons appear.
+ */
+.material-symbols-outlined {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  line-height: 1;
+  flex-shrink: 0;
+  overflow: hidden;
+  visibility: hidden;      /* hides the ligature word until the SVG replaces it */
+  vertical-align: -0.145em;
+  font-size: 24px;         /* Material default; text-[18px] etc. override it */
+}
+
+.material-symbols-outlined.icon-ready {
+  visibility: visible;
+}
+
+.material-symbols-outlined svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* With JavaScript disabled the icons stay hidden rather than printing raw
+   words. Every icon in this app sits beside a text label or an aria-label,
+   so nothing becomes unusable. */
