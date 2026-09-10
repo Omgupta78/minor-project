@@ -1,187 +1,231 @@
 {% extends "base.html" %}
+{% block title %}Take Attendance{% endblock %}
 
 {% block content %}
-<div class="max-w-6xl mx-auto flex flex-col lg:flex-row gap-5">
-  <!-- ─── LEFT COLUMN (60%) ─── -->
-  <div class="w-full lg:w-[60%] flex flex-col gap-5">
-    <!-- Stats Row -->
-    <div class="grid grid-cols-3 gap-3">
-      <div class="bg-white rounded-xl border border-bdr p-4 shadow-sm">
-        <div class="text-txt-m text-[10px] font-medium uppercase tracking-wider mb-1">Faces Detected</div>
-        <div class="text-3xl font-bold text-txt font-mono" id="stat-total">--</div>
-        <div class="text-[10px] text-txt-f font-mono mt-0.5">this scan</div>
+<div class="max-w-6xl mx-auto flex flex-col gap-5">
+
+  {% if not classes %}
+  <!-- ── EMPTY STATE ── -->
+  <div class="bg-white rounded-xl border border-bdr shadow-sm p-10 text-center">
+    <span class="material-symbols-outlined text-primary text-[48px]">school</span>
+    <h1 class="text-lg font-bold text-txt mt-3">Set up your first class</h1>
+    <p class="text-sm text-txt-m mt-1 max-w-md mx-auto">Create a class, enrol students with one clear photo each, then come back here to take attendance from a photo of the room.</p>
+    <a href="/students_page" class="inline-flex items-center gap-2 bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2.5 rounded-lg mt-5 transition-colors">
+      <span class="material-symbols-outlined text-[18px]">group_add</span>Go to Students
+    </a>
+  </div>
+  {% else %}
+
+  <!-- ── SESSION SETUP ── -->
+  <div class="bg-white rounded-xl border border-bdr shadow-sm p-4">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div>
+        <label for="sel-class" class="block text-[10px] font-semibold text-txt-m uppercase tracking-wider mb-1">Class</label>
+        <select id="sel-class" onchange="switchClass(this.value)" class="w-full border-bdr rounded-lg text-sm py-2 focus:ring-primary focus:border-primary">
+          {% for c in classes %}
+          <option value="{{ c.id }}" {{ 'selected' if c.id == class_id }}>{{ c.name }}{% if c.subject %} · {{ c.subject }}{% endif %}</option>
+          {% endfor %}
+        </select>
       </div>
-      <div class="bg-success-light rounded-xl border border-success/30 p-4 shadow-sm relative overflow-hidden">
-        <span class="material-symbols-outlined text-success absolute top-2 right-2 text-[18px]">check_circle</span>
-        <div class="text-success text-[10px] font-medium uppercase tracking-wider mb-1">Recognized</div>
-        <div class="text-3xl font-bold text-success font-mono" id="stat-recog">--</div>
-        <div class="text-[10px] text-txt-f font-mono mt-0.5" id="stat-rate">match rate</div>
+      <div>
+        <label for="in-date" class="block text-[10px] font-semibold text-txt-m uppercase tracking-wider mb-1">Date</label>
+        <input type="date" id="in-date" value="{{ today }}" class="w-full border-bdr rounded-lg text-sm py-2 focus:ring-primary focus:border-primary"/>
       </div>
-      <div class="bg-warn-light rounded-xl border border-warn/30 p-4 shadow-sm relative overflow-hidden">
-        <span class="material-symbols-outlined text-warn absolute top-2 right-2 text-[18px]">warning</span>
-        <div class="text-warn text-[10px] font-medium uppercase tracking-wider mb-1">Unknown</div>
-        <div class="text-3xl font-bold text-warn font-mono" id="stat-unknown">--</div>
-        <div class="text-[10px] text-txt-f font-mono mt-0.5">not in database</div>
+      <div>
+        <label for="in-period" class="block text-[10px] font-semibold text-txt-m uppercase tracking-wider mb-1">Period</label>
+        <select id="in-period" class="w-full border-bdr rounded-lg text-sm py-2 focus:ring-primary focus:border-primary">
+          {% for p in range(1, 9) %}<option value="{{ p }}">Period {{ p }}</option>{% endfor %}
+        </select>
       </div>
-    </div>
-
-    <!-- Capture & Analyze Card -->
-    <div class="bg-white rounded-xl border border-bdr shadow-sm flex flex-col overflow-hidden" style="min-height:420px">
-      <!-- Header -->
-      <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center flex-shrink-0">
-        <div class="flex items-center gap-2">
-          <span class="material-symbols-outlined text-primary text-[18px]">camera_alt</span>
-          <h2 class="font-semibold text-txt text-sm">Capture & Analyze</h2>
-        </div>
-        <div class="flex gap-2 text-[10px] font-mono" id="hud-chips">
-          <span class="bg-white text-txt-m px-2 py-0.5 rounded border border-bdr" id="hud-status">READY</span>
-        </div>
-      </div>
-
-      <!-- Preview / Upload area -->
-      <div class="relative flex-1 bg-slate-50 overflow-hidden cursor-pointer" id="drop-zone"
-           onclick="document.getElementById('file-input').click()" style="min-height:300px">
-
-        <!-- IDLE: Upload prompt -->
-        <div id="drop-prompt" class="absolute inset-0 flex flex-col items-center justify-center gap-4 p-8">
-          <div class="w-20 h-20 rounded-2xl bg-primary-light border-2 border-dashed border-primary/40 flex items-center justify-center">
-            <span class="material-symbols-outlined text-primary text-[40px]">cloud_upload</span>
-          </div>
-          <div class="text-center">
-            <p class="text-txt-m text-sm mb-1">Drop class photo here, or choose input</p>
-            <p class="text-txt-f text-xs">Supports JPG, PNG up to 16MB</p>
-          </div>
-          <div class="flex gap-3 mt-1" onclick="event.stopPropagation()">
-            <label for="file-input" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2 rounded-lg cursor-pointer flex items-center gap-2 transition-colors shadow-sm">
-              <span class="material-symbols-outlined text-[16px]">upload</span>Upload Photo
-            </label>
-            <button class="bg-white border border-bdr text-txt-m text-sm px-5 py-2 rounded-lg flex items-center gap-2 hover:border-primary hover:text-primary transition-colors shadow-sm" onclick="openCamera()">
-              <span class="material-symbols-outlined text-[16px]">camera_alt</span>Use Camera
-            </button>
-          </div>
-        </div>
-        <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleFile(this)"/>
-
-        <!-- ACTIVE: Canvas preview -->
-        <div id="preview-wrap" style="display:none" class="absolute inset-0 bg-slate-900 flex items-center justify-center">
-          <canvas id="preview-canvas"></canvas>
-        </div>
-
-        <!-- Drag highlight -->
-        <div id="drag-hl" class="absolute inset-0 border-2 border-dashed border-primary rounded-xl pointer-events-none opacity-0 transition-opacity bg-primary/5"></div>
-      </div>
-
-      <!-- Processing banner -->
-      <div id="proc-banner" class="hidden px-4 py-2.5 bg-primary-light border-t border-primary/20 items-center gap-2 flex-shrink-0">
-        <div class="spinner"></div>
-        <span class="text-xs font-mono text-primary">Processing… running face_recognition inference</span>
-      </div>
-
-      <!-- Footer info -->
-      <div class="px-4 py-2 border-t border-bdr flex justify-between items-center text-[10px] text-txt-f font-mono flex-shrink-0">
-        <span id="footer-info">Upload a photo to begin</span>
-        <span>Model: face_recognition · dlib</span>
+      <div>
+        <label for="in-teacher" class="block text-[10px] font-semibold text-txt-m uppercase tracking-wider mb-1">Taken by</label>
+        <input type="text" id="in-teacher" placeholder="Teacher name" class="w-full border-bdr rounded-lg text-sm py-2 focus:ring-primary focus:border-primary"/>
       </div>
     </div>
-
-    <!-- CTA Button -->
-    <button id="submit-btn" disabled onclick="takeAttendance()"
-      class="w-full bg-gradient-to-r from-primary to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-bold rounded-xl py-4 transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2 text-base disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-sm">
-      <span class="material-symbols-outlined text-[20px]" style="font-variation-settings:'FILL' 1">bolt</span>
-      MARK ATTENDANCE NOW
-    </button>
   </div>
 
-  <!-- ─── RIGHT COLUMN (40%) ─── -->
-  <div class="w-full lg:w-[40%] flex flex-col gap-5">
-    <!-- Session Progress -->
-    <div class="bg-white rounded-xl border border-bdr p-5 shadow-sm">
-      <h3 class="font-semibold text-txt text-sm mb-3 flex items-center gap-2">
-        <span class="material-symbols-outlined text-primary text-[18px]">donut_large</span>
-        Session Progress
-      </h3>
-      <div class="flex justify-between items-end mb-2">
-        <div class="text-txt-m text-sm">Marked Present</div>
-        <div class="font-mono">
-          <span class="text-2xl font-bold text-txt" id="marked-count">0</span>
-          <span class="text-txt-f text-lg"> / <span id="total-count">{{ students|length }}</span></span>
+  <!-- ── STATS ── -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-white rounded-xl border border-bdr p-4 shadow-sm">
+      <div class="text-txt-m text-[10px] font-medium uppercase tracking-wider mb-1">Enrolled</div>
+      <div class="text-2xl font-bold text-txt font-mono">{{ stats.students }}</div>
+      <div class="text-[10px] text-txt-f mt-0.5">students in class</div>
+    </div>
+    <div class="bg-white rounded-xl border border-bdr p-4 shadow-sm">
+      <div class="text-txt-m text-[10px] font-medium uppercase tracking-wider mb-1">Sessions</div>
+      <div class="text-2xl font-bold text-txt font-mono">{{ stats.total_sessions }}</div>
+      <div class="text-[10px] text-txt-f mt-0.5">{{ stats.sessions_today }} today</div>
+    </div>
+    <div class="bg-success-light rounded-xl border border-success/30 p-4 shadow-sm">
+      <div class="text-green-800 text-[10px] font-medium uppercase tracking-wider mb-1">Average</div>
+      <div class="text-2xl font-bold text-success font-mono">{{ stats.avg_percent }}%</div>
+      <div class="text-[10px] text-green-800/70 mt-0.5">attendance</div>
+    </div>
+    <div class="{{ 'bg-warn-light border-warn/30' if stats.defaulters else 'bg-white border-bdr' }} rounded-xl border p-4 shadow-sm">
+      <div class="text-[10px] font-medium uppercase tracking-wider mb-1 {{ 'text-warn' if stats.defaulters else 'text-txt-m' }}">Defaulters</div>
+      <div class="text-2xl font-bold font-mono {{ 'text-warn' if stats.defaulters else 'text-txt' }}">{{ stats.defaulters }}</div>
+      <div class="text-[10px] text-txt-f mt-0.5">below 75%</div>
+    </div>
+  </div>
+
+  <div class="flex flex-col lg:flex-row gap-5">
+    <!-- ── LEFT: CAPTURE ── -->
+    <div class="w-full lg:w-[58%] flex flex-col gap-4">
+      <div class="bg-white rounded-xl border border-bdr shadow-sm flex flex-col overflow-hidden">
+        <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-primary text-[18px]">burst_mode</span>
+            <h2 class="font-semibold text-txt text-sm">Class Photos</h2>
+          </div>
+          <span class="text-[10px] font-mono bg-white text-txt-m px-2 py-0.5 rounded border border-bdr" id="hud-status">READY</span>
+        </div>
+
+        <div class="relative bg-slate-50" id="drop-zone" style="min-height:320px">
+          <div id="drop-prompt" class="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6">
+            <div class="w-20 h-20 rounded-2xl bg-primary-light border-2 border-dashed border-primary/40 flex items-center justify-center">
+              <span class="material-symbols-outlined text-primary text-[40px]">add_a_photo</span>
+            </div>
+            <div class="text-center">
+              <p class="text-txt-m text-sm">Drop one or more photos of the class here</p>
+              <p class="text-txt-f text-xs mt-0.5">Up to <span id="max-photos">8</span> photos · JPG or PNG</p>
+            </div>
+            <div class="flex flex-wrap gap-3 justify-center">
+              <label for="file-input" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2.5 rounded-lg cursor-pointer flex items-center gap-2 transition-colors shadow-sm">
+                <span class="material-symbols-outlined text-[18px]">upload</span>Upload Photos
+              </label>
+              <button type="button" onclick="openCamera()" class="bg-white border border-bdr text-txt-m text-sm px-5 py-2.5 rounded-lg flex items-center gap-2 hover:border-primary hover:text-primary transition-colors shadow-sm">
+                <span class="material-symbols-outlined text-[18px]">camera_alt</span>Use Camera
+              </button>
+            </div>
+            <p class="text-[11px] text-txt-f text-center max-w-sm">
+              Covering the room in two or three shots (left, right, back row) identifies far more students than one wide photo.
+            </p>
+          </div>
+          <!-- No capture attribute here: on Android/iOS `capture` forces the camera and
+               silently overrides `multiple`, limiting the picker to a single shot.
+               Gallery multi-select needs it absent. Live capture has its own button. -->
+          <input type="file" id="file-input" accept="image/*" multiple class="hidden" onchange="handleFiles(this)"/>
+
+          <div id="preview-wrap" class="hidden absolute inset-0 bg-slate-900 flex items-center justify-center p-2">
+            <canvas id="preview-canvas"></canvas>
+          </div>
+          <div id="drag-hl" class="absolute inset-0 border-2 border-dashed border-primary rounded-xl pointer-events-none opacity-0 transition-opacity bg-primary/5"></div>
+        </div>
+
+        <!-- thumbnail strip -->
+        <div id="thumb-strip" class="hidden border-t border-bdr bg-surface-el px-3 py-2.5 gap-2 overflow-x-auto items-center"></div>
+
+        <div id="proc-banner" class="hidden px-4 py-2.5 bg-primary-light border-t border-primary/20 items-center gap-2">
+          <div class="spinner"></div>
+          <span class="text-xs font-mono text-primary" id="proc-text">Detecting and identifying faces…</span>
+        </div>
+
+        <div class="px-4 py-2 border-t border-bdr flex flex-wrap justify-between items-center gap-2 text-[10px] text-txt-f font-mono">
+          <span id="footer-info">No photos loaded</span>
+          <div class="flex gap-3">
+            <label for="file-input" class="text-primary hover:underline cursor-pointer" id="add-more" style="display:none">Add more</label>
+            <button type="button" onclick="resetScan()" class="text-primary hover:underline">Clear all</button>
+          </div>
         </div>
       </div>
-      <div class="h-3 bg-surface-el rounded-full overflow-hidden">
-        <div id="progress-bar" class="h-full bg-gradient-to-r from-primary-light to-primary rounded-full transition-all duration-700" style="width:0%"></div>
-      </div>
-      <div class="mt-1.5 text-right text-[10px] text-primary font-mono font-medium" id="pct-label">0% Complete</div>
-    </div>
 
-    <!-- Quick Actions -->
-    <div class="grid grid-cols-3 gap-3">
-      <a href="/download-excel" class="bg-white border border-bdr rounded-xl p-3 flex flex-col items-center justify-center gap-1.5 hover:border-primary hover:bg-primary-light transition-all shadow-sm group">
-        <span class="material-symbols-outlined text-txt-m group-hover:text-primary text-[22px]">download</span>
-        <span class="text-[10px] font-medium text-txt group-hover:text-primary">Excel</span>
-      </a>
-      <button onclick="window.print()" class="bg-white border border-bdr rounded-xl p-3 flex flex-col items-center justify-center gap-1.5 hover:border-primary hover:bg-primary-light transition-all shadow-sm group">
-        <span class="material-symbols-outlined text-txt-m group-hover:text-primary text-[22px]">description</span>
-        <span class="text-[10px] font-medium text-txt group-hover:text-primary">Report</span>
+      <div class="grid grid-cols-4 gap-3" id="scan-stats" style="display:none">
+        <div class="bg-white rounded-xl border border-bdr p-3 text-center shadow-sm">
+          <div class="text-[10px] text-txt-m uppercase tracking-wider">Photos</div>
+          <div class="text-xl font-bold font-mono text-txt" id="stat-images">0</div>
+        </div>
+        <div class="bg-white rounded-xl border border-bdr p-3 text-center shadow-sm">
+          <div class="text-[10px] text-txt-m uppercase tracking-wider">Faces</div>
+          <div class="text-xl font-bold font-mono text-txt" id="stat-total">0</div>
+        </div>
+        <div class="bg-success-light rounded-xl border border-success/30 p-3 text-center shadow-sm">
+          <div class="text-[10px] text-green-800 uppercase tracking-wider">Identified</div>
+          <div class="text-xl font-bold font-mono text-success" id="stat-matched">0</div>
+        </div>
+        <div class="bg-warn-light rounded-xl border border-warn/30 p-3 text-center shadow-sm">
+          <div class="text-[10px] text-warn uppercase tracking-wider">Check</div>
+          <div class="text-xl font-bold font-mono text-warn" id="stat-unknown">0</div>
+        </div>
+      </div>
+
+      <button id="scan-btn" disabled onclick="runScan()"
+        class="w-full bg-primary hover:bg-blue-700 text-white font-bold rounded-xl py-4 transition-colors shadow-md flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+        <span class="material-symbols-outlined text-[20px]">search</span><span id="scan-label">IDENTIFY STUDENTS</span>
       </button>
-      <button onclick="location.reload()" class="bg-white border border-bdr rounded-xl p-3 flex flex-col items-center justify-center gap-1.5 hover:border-primary hover:bg-primary-light transition-all shadow-sm group">
-        <span class="material-symbols-outlined text-txt-m group-hover:text-primary text-[22px]">refresh</span>
-        <span class="text-[10px] font-medium text-txt group-hover:text-primary">Reload</span>
+    </div>
+
+    <!-- ── RIGHT: REVIEW ── -->
+    <div class="w-full lg:w-[42%] flex flex-col gap-4">
+      <div class="bg-white rounded-xl border border-bdr shadow-sm flex flex-col overflow-hidden">
+        <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center">
+          <h3 class="font-semibold text-txt text-sm flex items-center gap-2">
+            <span class="material-symbols-outlined text-primary text-[18px]">fact_check</span>Review &amp; Confirm
+          </h3>
+          <span class="text-[10px] font-mono text-txt-f"><span id="review-present">0</span> / {{ students|length }} present</span>
+        </div>
+
+        <div class="px-4 py-2.5 bg-primary-light/50 border-b border-bdr text-[11px] text-txt-m flex items-start gap-1.5">
+          <span class="material-symbols-outlined text-primary text-[14px] mt-px">info</span>
+          <span>Nothing is saved until you press Confirm. Correct any mistakes first &mdash; you are the final authority, not the model.</span>
+        </div>
+
+        <div class="overflow-y-auto" id="review-list" style="max-height:430px">
+          <div class="text-center text-txt-f text-xs py-12 px-4">
+            Scan your class photos and every student will appear here for you to check.
+          </div>
+        </div>
+
+        <div class="p-3 border-t border-bdr flex gap-2">
+          <button type="button" onclick="markAll('absent')" class="flex-1 text-xs border border-bdr rounded-lg py-2 text-txt-m hover:border-danger hover:text-danger transition-colors">Clear all</button>
+          <button type="button" onclick="markAll('present')" class="flex-1 text-xs border border-bdr rounded-lg py-2 text-txt-m hover:border-success hover:text-success transition-colors">Mark all present</button>
+        </div>
+      </div>
+
+      <button id="confirm-btn" disabled onclick="confirmSession()"
+        class="w-full bg-success hover:bg-green-700 text-white font-bold rounded-xl py-4 transition-colors shadow-md flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+        <span class="material-symbols-outlined text-[20px]">task_alt</span>CONFIRM &amp; SAVE ATTENDANCE
       </button>
-    </div>
 
-    <!-- Live Attendance Log -->
-    <div class="bg-white rounded-xl border border-bdr shadow-sm flex flex-col overflow-hidden flex-1" style="min-height:200px;max-height:380px">
-      <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center flex-shrink-0">
-        <h3 class="font-semibold text-txt text-sm flex items-center gap-2">
-          <span class="material-symbols-outlined text-primary text-[16px]">history</span>Live Log
-        </h3>
-        <span class="text-[10px] font-mono text-txt-f" id="panel-date"></span>
-      </div>
-      <div class="flex-1 overflow-y-auto p-2" id="student-log">
-        <div class="text-center text-txt-f text-xs py-8">No attendance marked yet</div>
-      </div>
-      <div class="p-2 border-t border-bdr text-center flex-shrink-0">
-        <a href="/download-excel" class="text-xs text-primary font-medium hover:underline">Download Full Report →</a>
-      </div>
-    </div>
-
-    <!-- Registered Students -->
-    <details class="bg-white rounded-xl border border-bdr shadow-sm overflow-hidden group">
-      <summary class="flex justify-between items-center px-4 py-3 cursor-pointer select-none text-sm font-medium text-txt hover:bg-surface-el transition-colors list-none">
-        <span class="flex items-center gap-2">
-          <span class="material-symbols-outlined text-primary text-[16px]">badge</span>
-          Registered Students ({{ students|length }})
-        </span>
-        <span class="material-symbols-outlined text-[16px] text-txt-f group-open:rotate-180 transition-transform">expand_more</span>
-      </summary>
-      <div class="px-4 pb-3 flex flex-wrap gap-1.5">
-        {% for s in students %}
-        <span class="px-2 py-0.5 bg-surface-el border border-bdr rounded text-[11px] font-mono text-txt-m">{{ s }}</span>
+      {% if recent %}
+      <div class="bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
+        <div class="px-4 py-2.5 border-b border-bdr bg-surface-el text-xs font-semibold text-txt">Recent sessions</div>
+        {% for s in recent %}
+        <a href="/records/{{ s.id }}" class="flex justify-between items-center px-4 py-2.5 border-b border-bdr last:border-0 hover:bg-surface-el transition-colors">
+          <span class="text-xs font-mono text-txt-m">{{ s.date }} · P{{ s.period }}</span>
+          <span class="text-[10px] font-mono">
+            <span class="text-success">{{ s.present_count }}P</span> ·
+            <span class="text-danger">{{ s.absent_count }}A</span>
+          </span>
+        </a>
         {% endfor %}
       </div>
-    </details>
+      {% endif %}
+    </div>
   </div>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block modals %}
-<!-- ═══════════════════ CAMERA MODAL ═══════════════════ -->
-<div id="camera-modal" class="fixed inset-0 bg-black/40 z-[200] flex items-center justify-center backdrop-blur-sm">
+<div id="camera-modal" class="fixed inset-0 bg-black/50 z-[200] items-center justify-center backdrop-blur-sm p-4">
   <div class="bg-white rounded-xl border border-bdr shadow-2xl w-full max-w-lg overflow-hidden">
     <div class="flex items-center justify-between px-5 py-3 border-b border-bdr bg-surface-el">
       <span class="flex items-center gap-2 text-sm font-semibold text-txt">
         <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>Live Camera
       </span>
-      <button onclick="closeCamera()" class="text-txt-m hover:text-txt transition-colors">
+      <button onclick="closeCamera()" class="text-txt-m hover:text-txt" aria-label="Close camera">
         <span class="material-symbols-outlined">close</span>
       </button>
     </div>
     <video id="camera-video" autoplay playsinline class="w-full aspect-video bg-black object-cover block"></video>
-    <div class="p-4 flex justify-center bg-surface-el border-t border-bdr">
-      <button onclick="capturePhoto()" class="bg-primary hover:bg-blue-700 text-white font-semibold px-10 py-3 rounded-lg transition-colors flex items-center gap-2 shadow-md">
-        <span class="material-symbols-outlined text-[18px]" style="font-variation-settings:'FILL' 1">radio_button_checked</span>
-        Capture Photo
+    <div class="px-4 py-2 bg-white border-t border-bdr text-center text-[11px] text-txt-m">
+      Captured <span class="font-mono font-bold" id="cam-count">0</span> · keep shooting to cover the whole room
+    </div>
+    <div class="p-4 flex justify-center gap-2 bg-surface-el border-t border-bdr">
+      <button onclick="capturePhoto()" class="bg-primary hover:bg-blue-700 text-white font-semibold px-8 py-3 rounded-lg flex items-center gap-2 shadow-md transition-colors">
+        <span class="material-symbols-outlined text-[18px]">radio_button_checked</span>Capture
       </button>
+      <button onclick="closeCamera()" class="bg-white border border-bdr text-txt-m px-6 py-3 rounded-lg hover:border-primary hover:text-primary transition-colors">Done</button>
     </div>
   </div>
 </div>
@@ -189,190 +233,356 @@
 
 {% block scripts %}
 <script>
-let capturedBlob = null, mediaStream = null;
+const CLASS_ID = {{ class_id or 'null' }};
+const MAX_PHOTOS = 8;
 
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("panel-date").textContent = new Date().toLocaleDateString("en-IN",{month:"short",day:"numeric",year:"numeric"});
-  fetchToday();
-});
+/* photos = [{ file, dataUrl, width, height, faces }] */
+let photos = [];
+let activePhoto = 0;
+let mediaStream = null, lastScan = null;
 
+let roster = {{ students|map(attribute='id')|list|tojson }}.map((id, i) => ({
+  id: id,
+  roll_no: {{ students|map(attribute='roll_no')|list|tojson }}[i],
+  name: {{ students|map(attribute='name')|list|tojson }}[i],
+  status: "absent", confidence: null, manual: false, note: "", photo: null
+}));
+
+function switchClass(id) { window.location = "/?class_id=" + id; }
+
+document.getElementById("max-photos") && (document.getElementById("max-photos").textContent = MAX_PHOTOS);
+
+/* ---------- photo input ---------- */
 const dz = document.getElementById("drop-zone");
-const dh = document.getElementById("drag-hl");
-dz.addEventListener("dragover",  e => { e.preventDefault(); dh.style.opacity = "1"; });
-dz.addEventListener("dragleave", () => { dh.style.opacity = "0"; });
-dz.addEventListener("drop", e => {
-  e.preventDefault(); dh.style.opacity = "0";
-  const f = e.dataTransfer.files[0];
-  if (f && f.type.startsWith("image/")) loadPreview(f);
-});
-
-function handleFile(inp) { if (inp.files[0]) loadPreview(inp.files[0]); }
-
-function loadPreview(file) {
-  capturedBlob = file;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.getElementById("preview-canvas");
-      c.width = img.width; c.height = img.height;
-      c.getContext("2d").drawImage(img, 0, 0);
-      document.getElementById("drop-prompt").style.display = "none";
-      document.getElementById("preview-wrap").style.display = "flex";
-      document.getElementById("submit-btn").disabled = false;
-      document.getElementById("footer-info").textContent = "Photo loaded: " + file.name + " (" + (file.size/1024).toFixed(0) + " KB) — Ready to analyze";
-      document.getElementById("hud-status").textContent = "PHOTO LOADED";
-      document.getElementById("hud-status").className = "bg-primary-light text-primary px-2 py-0.5 rounded border border-primary/20";
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-  setConsole("Image loaded: " + file.name);
+if (dz) {
+  const dh = document.getElementById("drag-hl");
+  dz.addEventListener("dragover", e => { e.preventDefault(); dh.style.opacity = "1"; });
+  dz.addEventListener("dragleave", () => dh.style.opacity = "0");
+  dz.addEventListener("drop", e => {
+    e.preventDefault(); dh.style.opacity = "0";
+    addFiles([...e.dataTransfer.files].filter(f => f.type.startsWith("image/")));
+  });
 }
 
+function handleFiles(inp) {
+  addFiles([...inp.files]);
+  inp.value = "";   // allow re-picking the same file
+}
+
+function addFiles(files) {
+  if (!files.length) return;
+  const room = MAX_PHOTOS - photos.length;
+  if (room <= 0) { alert("You can scan at most " + MAX_PHOTOS + " photos in one session."); return; }
+  if (files.length > room) {
+    alert("Only " + room + " more photo(s) can be added — the rest were ignored.");
+    files = files.slice(0, room);
+  }
+  let pending = files.length;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        photos.push({ file, dataUrl: e.target.result, width: img.width, height: img.height, faces: [] });
+        if (--pending === 0) { activePhoto = photos.length - 1; refreshPhotoUI(); }
+      };
+      img.onerror = () => { if (--pending === 0) refreshPhotoUI(); };
+      img.src = e.target.result;
+    };
+    reader.onerror = () => { if (--pending === 0) refreshPhotoUI(); };
+    reader.readAsDataURL(file);
+  });
+}
+
+function removePhoto(i, ev) {
+  if (ev) ev.stopPropagation();
+  photos.splice(i, 1);
+  if (activePhoto >= photos.length) activePhoto = Math.max(0, photos.length - 1);
+  // Boxes belong to the old numbering, so a re-scan is required.
+  lastScan = null;
+  photos.forEach(p => p.faces = []);
+  document.getElementById("confirm-btn").disabled = true;
+  document.getElementById("scan-stats").style.display = "none";
+  refreshPhotoUI();
+}
+
+function refreshPhotoUI() {
+  const has = photos.length > 0;
+  document.getElementById("drop-prompt").classList.toggle("hidden", has);
+  document.getElementById("preview-wrap").classList.toggle("hidden", !has);
+  document.getElementById("scan-btn").disabled = !has;
+  document.getElementById("add-more").style.display = has ? "inline" : "none";
+
+  const strip = document.getElementById("thumb-strip");
+  strip.classList.toggle("hidden", !has);
+  strip.classList.toggle("flex", has);
+
+  const totalMb = photos.reduce((sum, p) => sum + p.file.size, 0) / 1048576;
+  document.getElementById("footer-info").textContent = has
+    ? photos.length + (photos.length === 1 ? " photo" : " photos") + " · " + totalMb.toFixed(1) + " MB"
+    : "No photos loaded";
+  document.getElementById("scan-label").textContent = photos.length > 1
+    ? "IDENTIFY STUDENTS IN " + photos.length + " PHOTOS" : "IDENTIFY STUDENTS";
+
+  strip.innerHTML = photos.map((p, i) => {
+    const n = (p.faces || []).length;
+    const tag = lastScan ? '<span class="absolute bottom-0 inset-x-0 bg-black/70 text-white text-[9px] font-mono text-center py-px">' + n + ' face' + (n === 1 ? '' : 's') + '</span>' : '';
+    return `
+    <button type="button" onclick="selectPhoto(${i})"
+      class="relative flex-shrink-0 w-20 h-16 rounded-lg overflow-hidden border-2 transition-colors ${i === activePhoto ? 'border-primary' : 'border-bdr hover:border-primary/50'}">
+      <img src="${p.dataUrl}" alt="Photo ${i + 1}" class="w-full h-full object-cover"/>
+      <span class="absolute top-0 left-0 bg-black/70 text-white text-[9px] font-mono px-1">${i + 1}</span>
+      <span onclick="removePhoto(${i}, event)" role="button" aria-label="Remove photo ${i + 1}"
+            class="absolute top-0 right-0 bg-danger text-white w-4 h-4 flex items-center justify-center text-[10px] leading-none">×</span>
+      ${tag}
+    </button>`;
+  }).join("");
+
+  if (has) drawPhoto();
+}
+
+function selectPhoto(i) { activePhoto = i; refreshPhotoUI(); }
+
+function resetScan() {
+  photos = []; activePhoto = 0; lastScan = null;
+  document.getElementById("confirm-btn").disabled = true;
+  document.getElementById("scan-stats").style.display = "none";
+  document.getElementById("file-input").value = "";
+  roster.forEach(s => { s.status = "absent"; s.confidence = null; s.manual = false; s.note = ""; s.photo = null; });
+  document.getElementById("review-list").innerHTML =
+    '<div class="text-center text-txt-f text-xs py-12 px-4">Scan your class photos and every student will appear here for you to check.</div>';
+  document.getElementById("review-present").textContent = "0";
+  refreshPhotoUI();
+  setHud("READY", "muted");
+}
+
+function setHud(text, tone) {
+  const el = document.getElementById("hud-status");
+  const tones = {
+    muted:   "bg-white text-txt-m border-bdr",
+    primary: "bg-primary-light text-primary border-primary/20",
+    success: "bg-success-light text-success border-success/20",
+    danger:  "bg-danger-light text-danger border-danger/20",
+  };
+  el.textContent = text;
+  el.className = "text-[10px] font-mono px-2 py-0.5 rounded border " + (tones[tone] || tones.muted);
+}
+
+/* ---------- camera ---------- */
 async function openCamera() {
   document.getElementById("camera-modal").style.display = "flex";
+  document.getElementById("cam-count").textContent = photos.length;
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
     document.getElementById("camera-video").srcObject = mediaStream;
-    setConsole("Camera stream started");
-  } catch (err) {
-    alert("Camera error: " + err.message);
-    closeCamera();
-  }
+  } catch (err) { alert("Camera error: " + err.message); closeCamera(); }
 }
 function closeCamera() {
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   document.getElementById("camera-modal").style.display = "none";
 }
 function capturePhoto() {
+  if (photos.length >= MAX_PHOTOS) { alert("Maximum " + MAX_PHOTOS + " photos per session."); return; }
   const v = document.getElementById("camera-video");
   const c = document.createElement("canvas");
   c.width = v.videoWidth; c.height = v.videoHeight;
   c.getContext("2d").drawImage(v, 0, 0);
-  c.toBlob(blob => {
-    loadPreview(new File([blob], "capture.jpg", { type: "image/jpeg" }));
-    closeCamera();
+  c.toBlob(b => {
+    const name = "capture-" + (photos.length + 1) + ".jpg";
+    addFiles([new File([b], name, { type: "image/jpeg" })]);
+    document.getElementById("cam-count").textContent = photos.length + 1;
   }, "image/jpeg", 0.92);
 }
 
-async function takeAttendance() {
-  if (!capturedBlob) return;
-  const btn = document.getElementById("submit-btn");
+/* ---------- scan ---------- */
+async function runScan() {
+  if (!photos.length || CLASS_ID === null) return;
+  const btn = document.getElementById("scan-btn");
   btn.disabled = true;
-  document.getElementById("proc-banner").classList.remove("hidden");
-  document.getElementById("proc-banner").classList.add("flex");
-  document.getElementById("hud-status").textContent = "PROCESSING…";
-  setConsole("Sending image to AI engine…");
+  document.getElementById("proc-banner").classList.replace("hidden", "flex");
+  document.getElementById("proc-text").textContent =
+    "Detecting faces in " + photos.length + (photos.length === 1 ? " photo…" : " photos…");
+  setHud("PROCESSING…", "primary");
+  setConsole("running face detection on " + photos.length + " photo(s)…");
 
   const fd = new FormData();
-  fd.append("photo", capturedBlob);
+  photos.forEach(p => fd.append("photos", p.file));
+  fd.append("class_id", CLASS_ID);
 
   try {
-    const res = await fetch("/take-attendance", { method: "POST", body: fd });
+    const res = await fetch("/api/scan", { method: "POST", body: fd });
     const data = await res.json();
-    if (data.error) { setConsole("Error: " + data.error); return; }
+    if (!res.ok || data.error) {
+      setHud("ERROR", "danger"); setConsole(data.error || "scan failed");
+      alert(data.error || "Scan failed"); return;
+    }
 
-    drawBoxes(data.boxes);
+    lastScan = data;
+    (data.images || []).forEach(img => {
+      if (photos[img.index]) photos[img.index].faces = img.faces || [];
+    });
 
-    const rec = data.recognized.length, tot = data.total_faces, unk = data.unknown_count;
-    const rate = tot ? Math.round(rec / tot * 100) : 0;
-    document.getElementById("stat-total").textContent   = String(tot).padStart(2, "0");
-    document.getElementById("stat-recog").textContent   = String(rec).padStart(2, "0");
-    document.getElementById("stat-unknown").textContent  = String(unk).padStart(2, "0");
-    document.getElementById("stat-rate").textContent     = rate + "% match rate";
-    document.getElementById("hud-status").textContent    = "SCAN COMPLETE";
-    document.getElementById("hud-status").className      = "bg-success-light text-success px-2 py-0.5 rounded border border-success/20";
-    document.getElementById("footer-info").textContent   = "Scan complete — " + rec + " recognized, " + unk + " unknown — attendance saved";
+    document.getElementById("scan-stats").style.display = "grid";
+    document.getElementById("stat-images").textContent = data.images_scanned ?? (data.images || []).length;
+    document.getElementById("stat-total").textContent = data.total_faces;
+    document.getElementById("stat-matched").textContent = data.matched;
+    document.getElementById("stat-unknown").textContent = data.unknown + data.needs_review;
 
-    setConsole("[" + ts() + "] Scan done: " + rec + "/" + tot + " recognized → saved to CSV");
-    fetchToday();
+    // The server already merged the photos and picked each student's best sighting.
+    const byId = {};
+    (data.roster || []).forEach(r => byId[r.id] = r);
+    roster.forEach(s => {
+      const hit = byId[s.id];
+      s.manual = false;
+      s.photo = hit ? hit.photo : null;
+      if (hit && hit.status === "matched") {
+        s.status = "present"; s.confidence = hit.confidence; s.note = "";
+      } else if (hit && hit.status === "review") {
+        s.status = "absent"; s.confidence = hit.confidence; s.note = "low confidence — check";
+      } else {
+        s.status = "absent"; s.confidence = null; s.note = "";
+      }
+    });
+
+    renderReview();
+    refreshPhotoUI();
+    document.getElementById("confirm-btn").disabled = false;
+    setHud("REVIEW REQUIRED", "success");
+
+    let msg = data.total_faces + " faces across " + (data.images || []).length +
+              " photo(s) · " + data.matched + " identified";
+    if (data.repeats) msg += " · " + data.repeats + " repeat sighting(s) merged";
+    setConsole(msg);
+    if (data.skipped && data.skipped.length) {
+      alert("These files could not be read and were skipped:\n" + data.skipped.join("\n"));
+    }
   } catch (err) {
-    setConsole("Error: " + err.message);
-    document.getElementById("hud-status").textContent = "ERROR";
+    setHud("ERROR", "danger"); alert("Scan failed: " + err.message);
   } finally {
-    document.getElementById("proc-banner").classList.add("hidden");
-    document.getElementById("proc-banner").classList.remove("flex");
+    document.getElementById("proc-banner").classList.replace("flex", "hidden");
     btn.disabled = false;
   }
 }
 
-function drawBoxes(boxes) {
+/* ---------- preview drawing ---------- */
+function drawPhoto() {
+  const p = photos[activePhoto];
+  if (!p) return;
   const canvas = document.getElementById("preview-canvas");
   const ctx = canvas.getContext("2d");
   const img = new Image();
   img.onload = () => {
-    ctx.drawImage(img, 0, 0);
-    boxes.forEach(b => {
-      const isUnk = b.name === "Unknown";
-      const color = isUnk ? "#F59E0B" : "#22C55E";
-      const w = b.right - b.left, h = b.bottom - b.top;
+    canvas.width = img.width; canvas.height = img.height;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
+    const palette = {
+      matched: "#16A34A", review: "#D97706",
+      unknown: "#DC2626", duplicate: "#64748B", repeat: "#2563EB",
+    };
+    (p.faces || []).forEach(f => {
+      const color = palette[f.status] || "#DC2626";
       ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(3, canvas.width / 250);
-      ctx.strokeRect(b.left, b.top, w, h);
+      ctx.lineWidth = Math.max(3, canvas.width / 300);
+      ctx.strokeRect(f.left, f.top, f.right - f.left, f.bottom - f.top);
 
-      const fs = Math.max(12, canvas.width / 55);
-      ctx.font = "600 " + fs + "px IBM Plex Mono, monospace";
-      const label = b.name.toUpperCase();
+      const fs = Math.max(13, canvas.width / 60);
+      ctx.font = "600 " + fs + "px monospace";
+      let label;
+      if (f.status === "matched" || f.status === "review") {
+        label = f.name + "  " + Math.round(f.confidence * 100) + "%";
+      } else if (f.status === "repeat") {
+        label = f.name + "  (also seen)";
+      } else if (f.status === "duplicate") {
+        label = "DUPLICATE";
+      } else {
+        label = "UNKNOWN";
+      }
       const tw = ctx.measureText(label).width;
       ctx.fillStyle = color;
-      ctx.fillRect(b.left - 1, b.bottom, tw + 14, fs + 8);
+      ctx.fillRect(f.left - 1, f.bottom, tw + 14, fs + 10);
       ctx.fillStyle = "#FFFFFF";
-      ctx.fillText(label, b.left + 6, b.bottom + fs + 2);
-
-      if (!isUnk) {
-        const conf = "94%";
-        ctx.fillStyle = color;
-        const cw = ctx.measureText(conf).width;
-        ctx.fillRect(b.right - cw - 10, b.top, cw + 10, fs + 4);
-        ctx.fillStyle = "#FFFFFF";
-        ctx.font = "bold " + (fs - 2) + "px IBM Plex Mono, monospace";
-        ctx.fillText(conf, b.right - cw - 5, b.top + fs);
-      }
+      ctx.fillText(label, f.left + 6, f.bottom + fs + 3);
     });
   };
-  img.src = canvas.toDataURL();
+  img.src = p.dataUrl;
 }
 
-async function fetchToday() {
-  try {
-    const res = await fetch("/attendance-today");
-    const data = await res.json();
-    renderLog(data.records);
-  } catch (e) {}
-}
-
-function renderLog(records) {
-  const total = parseInt(document.getElementById("total-count").textContent);
-  document.getElementById("marked-count").textContent = records.length;
-  const pct = total ? Math.round(records.length / total * 100) : 0;
-  document.getElementById("progress-bar").style.width = pct + "%";
-  document.getElementById("pct-label").textContent = pct + "% Complete";
-
-  const log = document.getElementById("student-log");
-  if (!records.length) {
-    log.innerHTML = '<div class="text-center text-txt-f text-xs py-8">No attendance marked yet</div>';
-    return;
-  }
-  log.innerHTML = records.map((r, i) => {
-    const ini = initials(r.Name);
-    const col = avatarColors[i % avatarColors.length];
+/* ---------- review ---------- */
+function renderReview() {
+  const list = document.getElementById("review-list");
+  list.innerHTML = roster.map((s, i) => {
+    const on = s.status === "present";
+    const conf = s.confidence !== null && s.confidence !== undefined
+      ? '<span class="font-mono text-[10px] ' + (s.confidence >= 0.6 ? 'text-success' : 'text-warn') + '">' + Math.round(s.confidence * 100) + '% match</span>'
+      : '<span class="font-mono text-[10px] text-txt-f">not detected</span>';
+    const where = s.photo && photos.length > 1
+      ? '<button type="button" onclick="selectPhoto(' + (s.photo - 1) + ')" class="text-[10px] text-primary hover:underline"> · photo ' + s.photo + '</button>'
+      : '';
+    const note = s.note
+      ? '<span class="text-[10px] text-warn"> · ' + s.note + '</span>' : '';
     return `
-    <div class="flex items-center justify-between p-3 hover:bg-surface-el rounded-lg transition-colors fade-in">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs" style="background:${col}">${ini}</div>
-        <div>
-          <div class="text-sm font-medium text-txt">${r.Name}</div>
-          <div class="text-[10px] font-mono text-txt-f">ID: CS-${String(2024000 + i + 1)}</div>
+    <div class="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-bdr last:border-0 ${on ? 'bg-success-light/40' : ''}">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0"
+             style="background:${avatarColors[i % avatarColors.length]}">${initials(s.name)}</div>
+        <div class="min-w-0">
+          <div class="text-sm font-medium text-txt truncate">${s.name}</div>
+          <div class="text-[10px] font-mono text-txt-f truncate">${s.roll_no} · ${conf}${where}${note}</div>
         </div>
       </div>
-      <div class="flex flex-col items-end gap-0.5">
-        <span class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider bg-success-light text-success border border-success/20">PRESENT</span>
-        <span class="text-[10px] text-txt-f font-mono">${r.Time}</span>
-      </div>
+      <button type="button" onclick="toggle(${i})" aria-pressed="${on}"
+        class="flex-shrink-0 min-w-[84px] text-[11px] font-bold tracking-wide px-3 py-2 rounded-lg border transition-colors ${
+          on ? 'bg-success text-white border-success hover:bg-green-700'
+             : 'bg-white text-txt-f border-bdr hover:border-success hover:text-success'}">
+        ${on ? 'PRESENT' : 'ABSENT'}
+      </button>
     </div>`;
   }).join("");
+  document.getElementById("review-present").textContent = roster.filter(s => s.status === "present").length;
 }
+
+function toggle(i) {
+  roster[i].status = roster[i].status === "present" ? "absent" : "present";
+  roster[i].manual = true;
+  renderReview();
+}
+function markAll(status) {
+  roster.forEach(s => { s.status = status; s.manual = true; });
+  renderReview();
+  document.getElementById("confirm-btn").disabled = false;
+}
+
+/* ---------- confirm ---------- */
+async function confirmSession() {
+  const btn = document.getElementById("confirm-btn");
+  btn.disabled = true;
+  const payload = {
+    class_id: CLASS_ID,
+    date: document.getElementById("in-date").value,
+    period: document.getElementById("in-period").value,
+    taken_by: document.getElementById("in-teacher").value,
+    total_faces: lastScan ? lastScan.total_faces : 0,
+    photo_count: photos.length,
+    present: roster.filter(s => s.status === "present").map(s => ({
+      student_id: s.id, confidence: s.confidence, manual: s.manual, status: "present"
+    })),
+  };
+  try {
+    const res = await fetch("/api/session/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) { alert(data.error || "Could not save"); btn.disabled = false; return; }
+    setConsole("saved: " + data.present + " present, " + data.absent + " absent");
+    window.location = "/records/" + data.session_id;
+  } catch (err) {
+    alert("Save failed: " + err.message);
+    btn.disabled = false;
+  }
+}
+
+if (roster.length) renderReview();
 </script>
 {% endblock %}
