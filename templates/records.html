@@ -1,49 +1,138 @@
 {% extends "base.html" %}
-
-{% block title %}Class Records{% endblock %}
+{% block title %}Records{% endblock %}
 
 {% block content %}
 <div class="max-w-6xl mx-auto flex flex-col gap-5">
-  <div class="flex items-center justify-between">
+
+  <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
-      <h1 class="text-xl font-bold text-txt">Class Records</h1>
-      <p class="text-sm text-txt-m">View past attendance logs</p>
+      <h1 class="text-xl font-bold text-txt">Attendance Records</h1>
+      <p class="text-sm text-txt-m">Every session, every student, and the full Excel export.</p>
     </div>
-    <a href="/download-excel" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2 rounded-lg cursor-pointer flex items-center gap-2 transition-colors shadow-sm">
-      <span class="material-symbols-outlined text-[18px]">download</span>Download All (Excel)
+    <a href="/download-excel?class_id={{ class_id or '' }}&start={{ start }}&end={{ end }}"
+       class="bg-success hover:bg-green-700 text-white font-medium text-sm px-5 py-2.5 rounded-lg flex items-center gap-2 transition-colors shadow-sm">
+      <span class="material-symbols-outlined text-[18px]">download</span>Download Excel Report
     </a>
   </div>
 
-  <div class="bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
-    <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center">
-      <h3 class="font-semibold text-txt text-sm flex items-center gap-2">
-        <span class="material-symbols-outlined text-primary text-[18px]">folder_open</span>Available Records
-      </h3>
+  <!-- Filters -->
+  <form method="GET" class="bg-white rounded-xl border border-bdr shadow-sm p-4 grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
+    <div>
+      <label for="f-class" class="block text-[10px] font-semibold text-txt-m uppercase tracking-wider mb-1">Class</label>
+      <select id="f-class" name="class_id" class="w-full border-bdr rounded-lg text-sm py-2 focus:ring-primary focus:border-primary">
+        <option value="">All classes</option>
+        {% for c in classes %}
+        <option value="{{ c.id }}" {{ 'selected' if class_id == c.id }}>{{ c.name }}{% if c.subject %} · {{ c.subject }}{% endif %}</option>
+        {% endfor %}
+      </select>
     </div>
-    
-    {% if csv_files %}
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-      {% for file in csv_files %}
-      <div class="border border-bdr rounded-lg p-4 hover:border-primary transition-colors hover:shadow-sm">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-success">task_alt</span>
-            <span class="font-mono text-sm font-semibold text-txt">{{ file.date_str }}</span>
-          </div>
-          <span class="bg-primary-light text-primary text-xs font-mono px-2 py-0.5 rounded border border-primary/20">{{ file.count }} present</span>
-        </div>
-        <div class="text-xs text-txt-m">
-          File: <code class="font-mono bg-bg px-1 rounded">{{ file.filename }}</code>
-        </div>
+    <div>
+      <label for="f-start" class="block text-[10px] font-semibold text-txt-m uppercase tracking-wider mb-1">From</label>
+      <input id="f-start" type="date" name="start" value="{{ start }}" class="w-full border-bdr rounded-lg text-sm py-2 focus:ring-primary focus:border-primary"/>
+    </div>
+    <div>
+      <label for="f-end" class="block text-[10px] font-semibold text-txt-m uppercase tracking-wider mb-1">To</label>
+      <input id="f-end" type="date" name="end" value="{{ end }}" class="w-full border-bdr rounded-lg text-sm py-2 focus:ring-primary focus:border-primary"/>
+    </div>
+    <button type="submit" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors">Apply</button>
+  </form>
+
+  <!-- Stats -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-white rounded-xl border border-bdr p-4 shadow-sm">
+      <div class="text-[10px] text-txt-m uppercase tracking-wider">Sessions</div>
+      <div class="text-2xl font-bold font-mono text-txt">{{ sessions|length }}</div>
+    </div>
+    <div class="bg-white rounded-xl border border-bdr p-4 shadow-sm">
+      <div class="text-[10px] text-txt-m uppercase tracking-wider">Students</div>
+      <div class="text-2xl font-bold font-mono text-txt">{{ summary|length }}</div>
+    </div>
+    <div class="bg-success-light rounded-xl border border-success/30 p-4 shadow-sm">
+      <div class="text-[10px] text-green-800 uppercase tracking-wider">Average</div>
+      <div class="text-2xl font-bold font-mono text-success">{{ stats.avg_percent }}%</div>
+    </div>
+    <div class="{{ 'bg-danger-light border-danger/30' if stats.defaulters else 'bg-white border-bdr' }} rounded-xl border p-4 shadow-sm">
+      <div class="text-[10px] uppercase tracking-wider {{ 'text-danger' if stats.defaulters else 'text-txt-m' }}">Below 75%</div>
+      <div class="text-2xl font-bold font-mono {{ 'text-danger' if stats.defaulters else 'text-txt' }}">{{ stats.defaulters }}</div>
+    </div>
+  </div>
+
+  <div class="flex flex-col lg:flex-row gap-5">
+    <!-- Sessions -->
+    <div class="w-full lg:w-1/2 bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
+      <div class="px-4 py-3 border-b border-bdr bg-surface-el">
+        <h3 class="font-semibold text-txt text-sm flex items-center gap-2">
+          <span class="material-symbols-outlined text-primary text-[18px]">event_note</span>Sessions
+        </h3>
       </div>
-      {% endfor %}
+      {% if sessions %}
+      <div class="overflow-y-auto" style="max-height:460px">
+        {% for s in sessions %}
+        <a href="/records/{{ s.id }}" class="flex items-center justify-between gap-3 px-4 py-3 border-b border-bdr last:border-0 hover:bg-surface-el transition-colors">
+          <div class="min-w-0">
+            <div class="text-sm font-medium text-txt">{{ s.date }} <span class="text-txt-f font-mono text-xs">P{{ s.period }}</span></div>
+            <div class="text-[11px] text-txt-m truncate">{{ s.class_name }}{% if s.class_subject %} · {{ s.class_subject }}{% endif %}{% if s.taken_by %} · {{ s.taken_by }}{% endif %}</div>
+          </div>
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-success-light text-success border border-success/20">{{ s.present_count }} P</span>
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-danger-light text-danger border border-danger/20">{{ s.absent_count }} A</span>
+            <span class="material-symbols-outlined text-txt-f text-[18px]">chevron_right</span>
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="p-10 text-center">
+        <span class="material-symbols-outlined text-txt-f text-[40px]">inbox</span>
+        <p class="text-sm text-txt-m mt-2">No sessions in this range.</p>
+        <a href="/" class="text-xs text-primary hover:underline mt-1 inline-block">Take attendance →</a>
+      </div>
+      {% endif %}
     </div>
-    {% else %}
-    <div class="p-8 text-center text-txt-m">
-      <span class="material-symbols-outlined text-4xl mb-2 text-txt-f">inbox</span>
-      <p>No attendance records found.</p>
+
+    <!-- Per-student summary -->
+    <div class="w-full lg:w-1/2 bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
+      <div class="px-4 py-3 border-b border-bdr bg-surface-el">
+        <h3 class="font-semibold text-txt text-sm flex items-center gap-2">
+          <span class="material-symbols-outlined text-primary text-[18px]">leaderboard</span>Attendance %
+        </h3>
+      </div>
+      {% if summary %}
+      <div class="overflow-y-auto" style="max-height:460px">
+        <table class="w-full text-sm">
+          <thead class="sticky top-0 bg-white">
+            <tr class="text-left text-[10px] uppercase tracking-wider text-txt-m border-b border-bdr">
+              <th class="px-4 py-2 font-semibold">Roll</th>
+              <th class="px-4 py-2 font-semibold">Name</th>
+              <th class="px-4 py-2 font-semibold text-center">P/H</th>
+              <th class="px-4 py-2 font-semibold text-right">%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in summary %}
+            <tr class="border-b border-bdr last:border-0 {{ 'bg-danger-light/40' if r.defaulter }}">
+              <td class="px-4 py-2 font-mono text-xs text-txt-m">{{ r.roll_no }}</td>
+              <td class="px-4 py-2 text-txt">{{ r.name }}</td>
+              <td class="px-4 py-2 text-center font-mono text-xs text-txt-m">{{ r.present }}/{{ r.held }}</td>
+              <td class="px-4 py-2 text-right font-mono text-xs font-bold {{ 'text-danger' if r.defaulter else 'text-success' }}">{{ r.percent }}%</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="p-10 text-center text-sm text-txt-m">No students to summarise.</div>
+      {% endif %}
     </div>
-    {% endif %}
+  </div>
+
+  <div class="bg-primary-light/50 border border-primary/20 rounded-xl p-4 text-xs text-txt-m flex items-start gap-2">
+    <span class="material-symbols-outlined text-primary text-[18px]">description</span>
+    <div>
+      <strong class="text-txt">The Excel report contains four sheets:</strong>
+      Summary (per-student totals, % and defaulter flag), Attendance Register (students × sessions grid with P/A/L),
+      Detailed Records (every mark with its confidence and whether the teacher corrected it), and Session Log.
+    </div>
   </div>
 </div>
 {% endblock %}

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Session {{ session.date }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto flex flex-col gap-5">
+
+  <a href="/records" class="text-xs text-txt-m hover:text-primary flex items-center gap-1 w-fit transition-colors">
+    <span class="material-symbols-outlined text-[16px]">arrow_back</span>All records
+  </a>
+
+  <div class="bg-white rounded-xl border border-bdr shadow-sm p-5">
+    <div class="flex flex-wrap justify-between items-start gap-4">
+      <div>
+        <h1 class="text-xl font-bold text-txt">{{ session.class_name }}{% if session.class_subject %} · {{ session.class_subject }}{% endif %}</h1>
+        <p class="text-sm text-txt-m mt-0.5 font-mono">{{ session.date }} · Period {{ session.period }}{% if session.taken_by %} · {{ session.taken_by }}{% endif %}</p>
+      </div>
+      <div class="flex gap-2">
+        <div class="text-center bg-success-light border border-success/30 rounded-lg px-4 py-2">
+          <div class="text-xl font-bold font-mono text-success">{{ present }}</div>
+          <div class="text-[10px] text-green-800 uppercase tracking-wider">Present</div>
+        </div>
+        <div class="text-center bg-danger-light border border-danger/30 rounded-lg px-4 py-2">
+          <div class="text-xl font-bold font-mono text-danger">{{ absent }}</div>
+          <div class="text-[10px] text-danger uppercase tracking-wider">Absent</div>
+        </div>
+        <div class="text-center bg-surface-el border border-bdr rounded-lg px-4 py-2">
+          <div class="text-xl font-bold font-mono text-txt">{{ session.total_faces }}</div>
+          <div class="text-[10px] text-txt-m uppercase tracking-wider">Faces</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
+    <div class="px-4 py-3 border-b border-bdr bg-surface-el flex justify-between items-center">
+      <h3 class="font-semibold text-txt text-sm">Roster</h3>
+      <span class="text-[10px] text-txt-f">Click a status to correct it</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm min-w-[560px]">
+        <thead>
+          <tr class="text-left text-[10px] uppercase tracking-wider text-txt-m border-b border-bdr">
+            <th class="px-4 py-2.5 font-semibold">Roll No</th>
+            <th class="px-4 py-2.5 font-semibold">Name</th>
+            <th class="px-4 py-2.5 font-semibold text-center">Confidence</th>
+            <th class="px-4 py-2.5 font-semibold text-center">Marked By</th>
+            <th class="px-4 py-2.5 font-semibold text-right">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr class="border-b border-bdr last:border-0" id="row-{{ r.id }}">
+            <td class="px-4 py-2.5 font-mono text-xs text-txt-m">{{ r.roll_no }}</td>
+            <td class="px-4 py-2.5 font-medium text-txt">{{ r.name }}</td>
+            <td class="px-4 py-2.5 text-center font-mono text-xs {{ 'text-success' if r.confidence and r.confidence >= 0.6 else 'text-txt-f' }}">
+              {% if r.confidence is not none %}{{ (r.confidence * 100)|round|int }}%{% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-center text-[10px] text-txt-m">
+              {% if r.method == 'manual' %}<span class="px-2 py-0.5 rounded bg-warn-light text-warn border border-warn/20 font-bold">TEACHER</span>
+              {% else %}<span class="px-2 py-0.5 rounded bg-surface-el text-txt-m border border-bdr">FACE</span>{% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-right">
+              <button type="button" onclick="toggleStatus({{ r.id }})" id="btn-{{ r.id }}"
+                data-status="{{ r.status }}"
+                class="min-w-[84px] text-[11px] font-bold tracking-wide px-3 py-2 rounded-lg border transition-colors">
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="flex flex-wrap gap-2 justify-between items-center">
+    <form method="POST" action="/records/{{ session.id }}/delete" onsubmit="return confirm('Delete this entire session?')">
+      <button type="submit" class="text-xs text-txt-f hover:text-danger transition-colors flex items-center gap-1">
+        <span class="material-symbols-outlined text-[16px]">delete</span>Delete session
+      </button>
+    </form>
+    <a href="/download-excel?class_id={{ session.class_id }}"
+       class="bg-success hover:bg-green-700 text-white font-medium text-sm px-5 py-2.5 rounded-lg flex items-center gap-2 transition-colors shadow-sm">
+      <span class="material-symbols-outlined text-[18px]">download</span>Download Excel Report
+    </a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SESSION_ID = {{ session.id }};
+
+function paint(btn) {
+  const on = btn.dataset.status === "present";
+  btn.textContent = on ? "PRESENT" : "ABSENT";
+  btn.className = "min-w-[84px] text-[11px] font-bold tracking-wide px-3 py-2 rounded-lg border transition-colors " +
+    (on ? "bg-success text-white border-success hover:bg-green-700"
+        : "bg-white text-txt-f border-bdr hover:border-success hover:text-success");
+}
+
+document.querySelectorAll("[id^='btn-']").forEach(paint);
+
+async function toggleStatus(studentId) {
+  const btn = document.getElementById("btn-" + studentId);
+  const next = btn.dataset.status === "present" ? "absent" : "present";
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/attendance/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: SESSION_ID, student_id: studentId, status: next }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) { alert(data.error || "Update failed"); return; }
+    btn.dataset.status = next;
+    paint(btn);
+    setConsole("updated — reload to refresh the totals");
+  } catch (err) {
+    alert("Update failed: " + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}
