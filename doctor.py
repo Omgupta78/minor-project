@@ -34,6 +34,8 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("upload cap raised for many photos", "app.py", "MAX_UPLOAD_MB", True),
     ("multi-image recognition", "recognition.py", "def identify_many", True),
     ("best-sighting merge across photos", "recognition.py", "def merge_across_images", True),
+    ("scan counts use images_scanned", "recognition.py", '"images_scanned": len(per_image)', True),
+    ("scan counts cannot clobber images", "recognition.py", '"images": len(per_image)', False),
     ("file picker allows multi-select", "templates/index.html", "multiple", True),
     ("no capture attr blocking mobile multi-select", "templates/index.html", 'capture="environment"', False),
     ("thumbnail strip in the UI", "templates/index.html", "thumb-strip", True),

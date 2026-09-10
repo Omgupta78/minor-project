@@ -46,7 +46,12 @@ check("no sighting became duplicate",
 
 # ---- 3. summary counts faces per detection but students once
 stats = rec.summarise(per_image, best)
-check("images counted", stats["images"] == 3, str(stats))
+check("photos counted", stats["images_scanned"] == 3, str(stats))
+# The /api/scan response carries the per-photo detail array under "images" and
+# then merges these counts in. If summarise() ever returns "images" again it
+# would replace that array with a number, and the browser would fail with
+# "(data.images || []).forEach is not a function".
+check("summarise cannot clobber the images array", "images" not in stats, str(stats))
 check("faces counted per detection", stats["total_faces"] == 5, str(stats["total_faces"]))
 check("students counted once", stats["matched"] == 3, str(stats["matched"]))
 check("repeats reported", stats["repeats"] == 2, str(stats["repeats"]))
