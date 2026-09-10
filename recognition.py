@@ -18,6 +18,7 @@ Key behaviours
 """
 from __future__ import annotations
 
+import io
 import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -38,7 +39,32 @@ UPSAMPLE = int(os.environ.get("FACE_UPSAMPLE", "1"))
 DETECTION_MODEL = os.environ.get("FACE_MODEL", "hog")  # "cnn" is slower/better
 MAX_EDGE = int(os.environ.get("MAX_EDGE", "1600"))     # cap for very large photos
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+# iPhones and recent Android phones shoot HEIC by default, so every layer of
+# the pipeline has to accept it: the upload form, the folder enrolment scan,
+# and the byte decoder used by /api/scan.
+HEIF_EXTS = {".heic", ".heif"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"} | HEIF_EXTS
+
+_HEIF_READY: Optional[bool] = None
+
+
+def register_heif() -> bool:
+    """Teach Pillow to open HEIC/HEIF files. Safe to call repeatedly.
+
+    Returns True when pillow-heif is installed. Everything else keeps working
+    when it is missing; only HEIC uploads are affected, and the caller can use
+    the return value to print an install hint instead of a cryptic error.
+    """
+    global _HEIF_READY
+    if _HEIF_READY is None:
+        try:
+            import pillow_heif
+
+            pillow_heif.register_heif_opener()
+            _HEIF_READY = True
+        except Exception:
+            _HEIF_READY = False
+    return _HEIF_READY
 
 
 class RecognitionUnavailable(RuntimeError):
@@ -105,6 +131,7 @@ class Face:
 def load_image(path_or_bytes) -> np.ndarray:
     """Load an image as an RGB numpy array from a path, bytes or file object."""
     fr = _fr()
+    register_heif()  # face_recognition opens files through Pillow
     return fr.load_image_file(path_or_bytes)
 
 
@@ -115,13 +142,39 @@ def bgr_to_rgb(frame: np.ndarray) -> np.ndarray:
 
 
 def decode_image_bytes(data: bytes) -> Optional[np.ndarray]:
-    """Decode raw upload bytes into an RGB array (None if not an image)."""
-    import cv2
+    """Decode raw upload bytes into an RGB array (None if not an image).
 
-    arr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-    if arr is None:
+    OpenCV cannot read HEIC/HEIF at all, and that is what an iPhone hands over
+    when the teacher picks a photo from the camera roll, so anything OpenCV
+    rejects gets a second attempt through Pillow.
+    """
+    try:
+        import cv2
+
+        arr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        if arr is not None:
+            return bgr_to_rgb(arr)
+    except Exception:
+        pass  # fall through to Pillow
+    return decode_with_pillow(data)
+
+
+def decode_with_pillow(data: bytes) -> Optional[np.ndarray]:
+    """Fallback decoder for HEIC/HEIF and any other format Pillow understands.
+
+    Also applies the EXIF orientation tag. Phone photos are almost always
+    stored landscape with a "rotate me" flag, and a sideways photo makes the
+    face detector miss most of the class.
+    """
+    register_heif()
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(io.BytesIO(data)) as image:
+            image = ImageOps.exif_transpose(image)
+            return np.asarray(image.convert("RGB"))
+    except Exception:
         return None
-    return bgr_to_rgb(arr)
 
 
 def _limit_size(rgb: np.ndarray) -> tuple[np.ndarray, float]:
@@ -145,7 +198,7 @@ def encode_face(image_path: os.PathLike | str) -> Optional[np.ndarray]:
     instead of silently registering a student who can never be recognised.
     """
     fr = _fr()
-    image = fr.load_image_file(str(image_path))
+    image = load_image(str(image_path))
     boxes = fr.face_locations(image, number_of_times_to_upsample=1)
     if not boxes:
         return None

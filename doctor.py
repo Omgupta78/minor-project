@@ -41,6 +41,10 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("offline stylesheet present", "static/app.css", "", True),
     ("offline icons present", "static/icons.js", "", True),
     ("no Tailwind CDN dependency", "templates/base.html", "cdn.tailwindcss.com", False),
+    ("iPhone HEIC photos accepted", "recognition.py", "HEIF_EXTS", True),
+    ("HEIC fallback decoder for scans", "recognition.py", "def decode_with_pillow", True),
+    ("upload form offers HEIC", "templates/index.html", ".heic", True),
+    ("pillow-heif in requirements", "requirements.txt", "pillow-heif", True),
 ]
 
 
