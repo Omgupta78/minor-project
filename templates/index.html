@@ -87,7 +87,7 @@
             </div>
             <div class="text-center">
               <p class="text-txt-m text-sm">Drop one or more photos of the class here</p>
-              <p class="text-txt-f text-xs mt-0.5">Up to <span id="max-photos">8</span> photos · JPG or PNG</p>
+              <p class="text-txt-f text-xs mt-0.5">Up to <span id="max-photos">8</span> photos · JPG, PNG or HEIC</p>
             </div>
             <div class="flex flex-wrap gap-3 justify-center">
               <label for="file-input" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2.5 rounded-lg cursor-pointer flex items-center gap-2 transition-colors shadow-sm">
@@ -104,7 +104,7 @@
           <!-- No capture attribute here: on Android/iOS `capture` forces the camera and
                silently overrides `multiple`, limiting the picker to a single shot.
                Gallery multi-select needs it absent. Live capture has its own button. -->
-          <input type="file" id="file-input" accept="image/*" multiple class="hidden" onchange="handleFiles(this)"/>
+          <input type="file" id="file-input" accept="image/*,.heic,.heif" multiple class="hidden" onchange="handleFiles(this)"/>
 
           <div id="preview-wrap" class="hidden absolute inset-0 bg-slate-900 flex items-center justify-center p-2">
             <canvas id="preview-canvas"></canvas>
@@ -260,8 +260,14 @@ if (dz) {
   dz.addEventListener("dragleave", () => dh.style.opacity = "0");
   dz.addEventListener("drop", e => {
     e.preventDefault(); dh.style.opacity = "0";
-    addFiles([...e.dataTransfer.files].filter(f => f.type.startsWith("image/")));
+    addFiles([...e.dataTransfer.files].filter(isImageFile));
   });
+}
+
+/* Chrome on Windows reports no MIME type for .heic, so a dragged iPhone photo
+   would be filtered out. Fall back to the file extension in that case. */
+function isImageFile(f) {
+  return f.type.startsWith("image/") || /\.(heic|heif|jpe?g|png|webp|bmp)$/i.test(f.name);
 }
 
 function handleFiles(inp) {
