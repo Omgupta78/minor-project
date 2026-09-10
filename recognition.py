@@ -373,8 +373,12 @@ def summarise(per_image: Sequence[Sequence[Face]], best: dict[int, Face]) -> dic
     flat = [face for faces in per_image for face in faces]
     matched = [f for f in best.values() if f.status == "matched"]
     review = [f for f in best.values() if f.status == "review"]
+    # NOTE: these counts are merged into the /api/scan response, which already
+    # carries the per-photo detail array under "images". This key must stay
+    # "images_scanned" or it would overwrite that array with a number and the
+    # browser would try to call .forEach on it.
     return {
-        "images": len(per_image),
+        "images_scanned": len(per_image),
         "total_faces": len(flat),
         "matched": len(matched),
         "needs_review": len(review),
