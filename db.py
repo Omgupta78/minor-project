@@ -57,6 +57,23 @@ CREATE TABLE IF NOT EXISTS students (
     created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- Extra reference photos for a student. One photo captures one angle and one
+-- lighting condition, which is the main cause of missed matches. Every
+-- encoding here is compared against during a scan and the closest one wins,
+-- so adding photos can only ever improve recognition.
+-- students.encoding stays as the first/primary encoding so old databases and
+-- old code keep working.
+CREATE TABLE IF NOT EXISTS student_encodings (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id  INTEGER NOT NULL REFERENCES students (id) ON DELETE CASCADE,
+    encoding    BLOB    NOT NULL,
+    photo_path  TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_encodings_student
+    ON student_encodings (student_id);
+
 CREATE TABLE IF NOT EXISTS sessions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     class_id     INTEGER NOT NULL REFERENCES classes (id) ON DELETE CASCADE,
@@ -222,6 +239,55 @@ def delete_student(conn, student_id: int) -> None:
     conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
 
 
+# ------------------------------------------------- extra reference photos
+def add_student_encoding(
+    conn,
+    student_id: int,
+    encoding: np.ndarray,
+    photo_path: Optional[str] = None,
+) -> int:
+    """Store an additional reference encoding for a student.
+
+    If the student has no primary encoding yet (enrolled before this feature,
+    or enrolled from a photo with no detectable face) the first one added is
+    promoted to the primary slot so old code paths keep working.
+    """
+    row = conn.execute(
+        "SELECT encoding FROM students WHERE id = ?", (student_id,)
+    ).fetchone()
+    if row is not None and row["encoding"] is None:
+        update_student(conn, student_id, encoding=encoding, photo_path=photo_path)
+        return 0
+    cur = conn.execute(
+        """INSERT INTO student_encodings (student_id, encoding, photo_path)
+           VALUES (?, ?, ?)""",
+        (student_id, encode_to_blob(encoding), photo_path),
+    )
+    return cur.lastrowid
+
+
+def encoding_counts(conn, class_id: Optional[int] = None) -> dict[int, int]:
+    """How many reference photos each student has, primary included."""
+    counts: dict[int, int] = {}
+    for row in list_students(conn, class_id):
+        counts[row["id"]] = 1 if row["encoding"] is not None else 0
+    try:
+        rows = conn.execute(
+            "SELECT student_id, COUNT(*) AS n FROM student_encodings GROUP BY student_id"
+        ).fetchall()
+    except Exception:  # table missing on a database created by an older build
+        return counts
+    for row in rows:
+        if row["student_id"] in counts:
+            counts[row["student_id"]] += row["n"]
+    return counts
+
+
+def clear_student_encodings(conn, student_id: int) -> None:
+    """Drop the extra photos, keeping the primary encoding."""
+    conn.execute("DELETE FROM student_encodings WHERE student_id = ?", (student_id,))
+
+
 def list_students(conn, class_id: Optional[int] = None, active_only: bool = True):
     where = ["1 = 1"]
     params: list = []
@@ -256,10 +322,33 @@ def known_faces(conn, class_id: Optional[int] = None):
     matrix is an (N, 128) float64 array ready for face_recognition.face_distance.
     """
     rows = [r for r in list_students(conn, class_id) if r["encoding"] is not None]
-    ids = [r["id"] for r in rows]
-    labels = [{"id": r["id"], "name": r["name"], "roll_no": r["roll_no"]} for r in rows]
-    if rows:
-        matrix = np.vstack([blob_to_encoding(r["encoding"]) for r in rows])
+
+    # Extra reference photos, keyed by student. A student with three photos
+    # contributes three rows to the matrix; they all carry the same label, so
+    # whichever one is closest wins and the student is still identified once.
+    extra: dict[int, list] = {}
+    try:
+        for row in conn.execute(
+            "SELECT student_id, encoding FROM student_encodings ORDER BY id"
+        ):
+            extra.setdefault(row["student_id"], []).append(
+                blob_to_encoding(row["encoding"])
+            )
+    except Exception:  # database created before this table existed
+        extra = {}
+
+    ids: list[int] = []
+    labels: list[dict] = []
+    vectors: list[np.ndarray] = []
+    for r in rows:
+        label = {"id": r["id"], "name": r["name"], "roll_no": r["roll_no"]}
+        for vector in [blob_to_encoding(r["encoding"])] + extra.get(r["id"], []):
+            ids.append(r["id"])
+            labels.append(label)
+            vectors.append(vector)
+
+    if vectors:
+        matrix = np.vstack(vectors)
     else:
         matrix = np.empty((0, 128), dtype=np.float64)
     return ids, labels, matrix
