@@ -137,9 +137,11 @@ All optional, set as environment variables:
 
 ### Tuning for back-row students
 
-In order of effect: get closer or use a higher-resolution camera, raise `MAX_EDGE`
-to `2200`, set `FACE_UPSAMPLE=2`, or take two photos (front half, back half) as two
-periods.
+Most of this is now automatic (see "Far-away students" below). If the back rows
+are still being missed, in order of effect: get closer or use a higher-resolution
+camera, set `FACE_UPSAMPLE=2`, force `TILE_SCAN=1`, lower `SMALL_FACE_PX` handling
+by raising `UPSCALE_FACE_PX` to `180`, or take two photos (front half, back half)
+in the same session.
 
 ---
 
@@ -436,13 +438,56 @@ shrink a back-row face below the detector's minimum size. With tiling on, the
 photo is instead searched in overlapping `TILE_SIZE` windows at full
 resolution, and duplicate detections from the overlaps are merged.
 
+Tiling is now decided per photo. The default `TILE_SCAN=auto` turns it on only
+when the photo is large enough that shrinking it to `MAX_EDGE` would throw away
+the detail the back row depends on, so a close-up of six students is still
+scanned at the old speed while a 12 MP hall shot gets the full treatment.
+
 ```
-set TILE_SCAN=1        # Windows
-export TILE_SCAN=1     # macOS / Linux
+set TILE_SCAN=1        # Windows  - force it on for every photo
+export TILE_SCAN=0     # macOS / Linux - switch it off entirely
 ```
 
-It is off by default because it multiplies scan time by the number of tiles.
-Turn it on for a wide room, or when the back two rows are being missed.
+### 5. Far-away students: crop, enlarge, then encode
+
+Detecting a distant face is only half the problem. dlib's encoder internally
+resizes whatever it is handed to about 150 px, so passing it a 70 px back-row
+face means it upscales a blurry thumbnail with a crude filter, and the resulting
+128-D vector is too noisy to match against the student's reference photo. The
+face is found, then reported as unknown.
+
+So any face narrower than `SMALL_FACE_PX` (110) now takes a different path:
+
+1. It is cropped out of the **original** photo - never the shrunk copy - with a
+   `CROP_MARGIN` of 45% around it, because the encoder expects to see forehead
+   and chin.
+2. The crop is enlarged with Pillow's LANCZOS filter to roughly
+   `UPSCALE_FACE_PX`, capped at `MAX_UPSCALE` so a 10 px speck is not blown up
+   fifteen times into an invention.
+3. The detector is re-run on the enlarged crop. A box drawn at that size is
+   better aligned than the scaled-up original, and alignment is most of encoding
+   quality. If nothing is found, the scaled box is used.
+4. The crop is encoded with `SMALL_FACE_JITTERS` (2) passes, which averages out
+   the noise that enlargement introduces.
+
+Faces at or above `SMALL_FACE_PX` still go through one batched encode call, so a
+front-row-only photo costs exactly what it did before. Only the handful of
+distant faces pay the slower path.
+
+Two honesty notes, because this is a marks-carrying record:
+
+* **The match threshold is not loosened for far faces.** Only the *review* band
+  is widened, by `SMALL_FACE_SLACK` (0.06). A borderline distant face is put in
+  front of the teacher as a suggestion to confirm, rather than being silently
+  marked present. A face past `MATCH_DISTANCE` is never auto-accepted just
+  because it was far away.
+* **Every face now reports `face_px` and `upscaled`** in the scan response, so
+  "nobody was detected there" and "somebody was detected but was too far away to
+  read" are distinguishable instead of both showing up as a red box.
+
+Enlarging pixels cannot add detail that the camera never captured. Below roughly
+40 px a face is genuinely unrecoverable, and the honest answer is a closer photo,
+not a bigger upscale factor.
 
 ### Measuring it, rather than guessing
 
@@ -484,18 +529,26 @@ defensible sentence for the report.
 | `MIN_SHARPNESS` | 25 | blur cutoff |
 | `MIN_BRIGHTNESS` | 45 | darkness cutoff |
 | `MAX_BRIGHTNESS` | 225 | over-exposure cutoff |
-| `TILE_SCAN` | 0 | set to 1 for full-resolution tiled detection |
+| `TILE_SCAN` | `auto` | `auto` tiles big photos only; `1` always, `0` never |
 | `TILE_SIZE` | 1200 | tile edge in pixels |
 | `TILE_OVERLAP` | 240 | overlap so faces on a seam are not lost |
+| `SMALL_FACE_PX` | 110 | faces narrower than this are cropped and enlarged |
+| `UPSCALE_FACE_PX` | 150 | target face width after enlargement |
+| `MAX_UPSCALE` | 4.0 | hard cap on the enlargement factor |
+| `CROP_MARGIN` | 0.45 | margin kept around a face when cropping it out |
+| `SMALL_FACE_JITTERS` | 2 | jittered passes when encoding an enlarged face |
+| `SMALL_FACE_SLACK` | 0.06 | extra **review** band for far faces (never match) |
 
 ### Tests
 
 ```
-python qualitytest.py   # 47 checks over the accuracy work
+python smalltest.py     # 35 checks over far-away / small faces
+python qualitytest.py   # 60 checks over the accuracy work
 python selftest.py      # core logic
 python multitest.py     # multi-photo sessions
-python doctor.py        # 26 checks: is this folder the current build?
+python heictest.py      # iPhone HEIC decoding
+python doctor.py        # 32 checks: is this folder the current build?
 ```
 
-`qualitytest.py` stubs out `face_recognition`, so it runs on a machine without
+All of these stub out `face_recognition`, so they run on a machine without
 dlib, OpenCV or Flask installed.
