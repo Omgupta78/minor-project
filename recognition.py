@@ -78,6 +78,28 @@ SMALL_FACE_JITTERS = int(os.environ.get("SMALL_FACE_JITTERS", "2"))
 # then surfaced to the teacher for one click instead of being dropped.
 SMALL_FACE_SLACK = float(os.environ.get("SMALL_FACE_SLACK", "0.06"))
 
+# Guarding against confident nonsense. With only a handful of students
+# enrolled, every stranger in the photo still has a "nearest" reference, and
+# at classroom distance that nearest distance can drift into the review band.
+# The name then appears next to somebody who is not in the class at all.
+# Two rules stop that:
+#   MATCH_MARGIN       - a guess must be clearly better than the runner-up
+#                        from a DIFFERENT student, otherwise we admit we do
+#                        not know instead of picking one.
+#   SMALL_FACE_PENALTY - a face that had to be enlarged is noisier, so it has
+#                        to clear a slightly stricter bar to be auto-accepted.
+MATCH_MARGIN = float(os.environ.get("MATCH_MARGIN", "0.06"))
+SMALL_FACE_PENALTY = float(os.environ.get("SMALL_FACE_PENALTY", "0.04"))
+
+# Rescue pass for low-resolution photos: a screenshot, a WhatsApp-compressed
+# forward, or a photo taken from the back of a hall. Tiling cannot help there
+# because the pixels are already gone, but enlarging the whole image once and
+# searching again does: a 40 px face is below the detector's minimum size, an
+# 80 px one is not. Only used when the photo is small, so a full-resolution
+# camera photo never pays for it.
+RESCUE_MODE = os.environ.get("RESCUE_PASS", "auto").strip().lower()
+RESCUE_UPSCALE = float(os.environ.get("RESCUE_UPSCALE", "2.0"))
+
 # iPhones and recent Android phones shoot HEIC by default, so every layer of
 # the pipeline has to accept it: the upload form, the folder enrolment scan,
 # and the byte decoder used by /api/scan.
@@ -167,6 +189,10 @@ class Face:
     # and the review screen should be able to tell them apart.
     face_px: int = 0
     upscaled: bool = False
+    # How much closer the winning student was than the best competing student.
+    # A tiny gap means "these two are equally plausible", which is a refusal to
+    # guess rather than a match, and is worth showing in the review screen.
+    runner_up_gap: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -510,6 +536,74 @@ def encode_boxes(rgb: np.ndarray, boxes: Sequence[tuple]) -> list[Optional[np.nd
     return out
 
 
+def should_rescue(height: int, width: int, boxes: Sequence[tuple]) -> bool:
+    """Is a second, enlarged detection pass worth running on this photo?
+
+    Only for photos that are already small: a screenshot, a compressed forward,
+    or a wide shot taken from the back. There tiling cannot help -- the pixels
+    are gone -- but enlarging the whole frame once puts small faces back above
+    the detector's minimum size. A full-resolution camera photo is tiled
+    instead and never pays this cost.
+    """
+    if RESCUE_MODE in {"0", "false", "no", "off"}:
+        return False
+    if RESCUE_MODE in {"1", "true", "yes", "on"}:
+        return True
+    if max(int(height), int(width)) > MAX_EDGE:
+        return False
+    if not boxes:
+        return True
+    smallest = min(
+        min(int(b[1]) - int(b[3]), int(b[2]) - int(b[0])) for b in boxes
+    )
+    # Small faces were found, so there are probably smaller ones that were not.
+    return smallest < SMALL_FACE_PX
+
+
+def detect_rescue(rgb: np.ndarray, factor: Optional[float] = None) -> list[tuple]:
+    """Detect again on an enlarged copy of the whole photo, in original coords."""
+    fr = _fr()
+    factor = RESCUE_UPSCALE if factor is None else float(factor)
+    if factor <= 1.0:
+        return []
+    big = _upscale(np.asarray(rgb), factor)
+    try:
+        found = fr.face_locations(
+            big, number_of_times_to_upsample=UPSAMPLE, model=DETECTION_MODEL
+        )
+    except TypeError:  # a stub or older signature
+        found = fr.face_locations(big)
+    return [tuple(int(round(v / factor)) for v in box) for box in found]
+
+
+def detect_faces(rgb: np.ndarray) -> list[tuple]:
+    """Every face in a photo, in original-photo coordinates.
+
+    Three strategies, picked by photo size: tile a large photo at full
+    resolution, shrink a huge one for speed, and give a small one a second
+    enlarged pass. Boxes from both passes are merged, so a face found twice is
+    reported once.
+    """
+    fr = _fr()
+    image = np.asarray(rgb)
+    height, width = image.shape[:2]
+
+    if should_tile(height, width):
+        boxes: list[tuple] = list(detect_tiled(image))
+    else:
+        small, scale = _limit_size(image)
+        found = fr.face_locations(
+            small, number_of_times_to_upsample=UPSAMPLE, model=DETECTION_MODEL
+        )
+        # Map back to original-photo coordinates immediately, so encoding and
+        # the boxes drawn in the UI both work at full detail.
+        boxes = [tuple(int(round(v / scale)) for v in box) for box in found]
+
+    if should_rescue(height, width, boxes):
+        boxes = merge_boxes(boxes + detect_rescue(image))
+    return boxes
+
+
 def encode_enrolment(image: np.ndarray) -> tuple[Optional[np.ndarray], dict]:
     """Encode the one face in an enrolment photo and report on its quality.
 
@@ -596,20 +690,8 @@ def identify(
     """
     fr = _fr()
     image = np.asarray(rgb_image)
-    height, width = image.shape[:2]
 
-    if should_tile(height, width):
-        # Full resolution, tile by tile: slower, but keeps small back-row
-        # faces big enough for the detector to see them.
-        boxes = detect_tiled(image)
-    else:
-        small, scale = _limit_size(image)
-        found = fr.face_locations(
-            small, number_of_times_to_upsample=UPSAMPLE, model=DETECTION_MODEL
-        )
-        # Map back to original-photo coordinates immediately, so encoding and
-        # the boxes drawn in the UI both work at full detail.
-        boxes = [tuple(int(round(v / scale)) for v in box) for box in found]
+    boxes = detect_faces(image)
     if not boxes:
         return []
 
@@ -637,29 +719,55 @@ def identify(
             continue
 
         if len(known_matrix):
-            distances = fr.face_distance(known_matrix, encoding)
+            distances = np.asarray(
+                fr.face_distance(known_matrix, encoding), dtype=float
+            )
             best = int(np.argmin(distances))
             dist = float(distances[best])
+            winner = labels[best]["id"]
             face.distance = round(dist, 4)
             face.confidence = distance_to_confidence(dist, threshold)
-            # A distant face is noisier, so its best distance sits a little
-            # higher even when the answer is right. Widen the review band for
-            # those, never the match band: the teacher gets a suggestion to
-            # confirm instead of the app inventing a match.
+
+            # How much better was the winner than the best *other* student?
+            # Several reference photos of the same student are teammates, not
+            # competitors, so they are excluded from this comparison.
+            rivals = [
+                float(d)
+                for d, label in zip(distances, labels)
+                if label["id"] != winner
+            ]
+            gap = min(rivals) - dist if rivals else None
+            face.runner_up_gap = None if gap is None else round(gap, 4)
+
+            # A face that had to be enlarged is noisier in both directions, so
+            # it must clear a slightly stricter bar to be auto-accepted, while
+            # its review band is widened -- a far student is surfaced for one
+            # click instead of being silently dropped or silently matched.
+            match_limit = threshold - (
+                SMALL_FACE_PENALTY if face.upscaled else 0.0
+            )
             review_limit = review_threshold + (
                 SMALL_FACE_SLACK if face.upscaled else 0.0
             )
-            if dist <= threshold:
+            # If the two nearest students are equally plausible, the honest
+            # answer is "I do not know" rather than whichever won by a hair.
+            # This is what stops a stranger's face from borrowing the name of
+            # the only few students who happen to be enrolled.
+            decided = gap is None or gap >= MATCH_MARGIN
+
+            if decided and dist <= match_limit:
                 face.status = "matched"
-                face.student_id = labels[best]["id"]
+                face.student_id = winner
                 face.name = labels[best]["name"]
                 face.roll_no = labels[best]["roll_no"]
-            elif dist <= review_limit:
+            elif decided and dist <= review_limit:
                 # Close, but not close enough to accept on its own.
                 face.status = "review"
-                face.student_id = labels[best]["id"]
+                face.student_id = winner
                 face.name = labels[best]["name"]
                 face.roll_no = labels[best]["roll_no"]
+            # Anything else stays unknown: either too far from every reference,
+            # or too close to two different students to choose between them.
         faces.append(face)
 
     return faces
@@ -687,9 +795,16 @@ def resolve_duplicates(faces: list[Face]) -> list[Face]:
         if face.student_id is None:
             continue
         if best_for_student.get(face.student_id) is not face:
-            face.status = "duplicate"
+            if face.status == "review":
+                # This was only a suggestion, and a better face for the same
+                # student exists in the photo. Calling it "Duplicate" implies
+                # we know who it is; "Unknown" is the truthful label.
+                face.status = "unknown"
+                face.name = "Unknown"
+            else:
+                face.status = "duplicate"
+                face.name = "Duplicate"
             face.student_id = None
-            face.name = "Duplicate"
             face.roll_no = ""
     return faces
 
