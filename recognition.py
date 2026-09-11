@@ -52,11 +52,31 @@ MIN_SHARPNESS = float(os.environ.get("MIN_SHARPNESS", "25"))
 MIN_BRIGHTNESS = float(os.environ.get("MIN_BRIGHTNESS", "45"))
 MAX_BRIGHTNESS = float(os.environ.get("MAX_BRIGHTNESS", "225"))
 
-# Tiled detection. Off by default because it is slower; turn it on when back
-# rows are being missed in wide classroom photos.
-TILE_SCAN = os.environ.get("TILE_SCAN", "0") == "1"
+# Tiled detection. "auto" (the default) tiles only when the photo is big
+# enough that shrinking it to MAX_EDGE would throw away the detail the back
+# row depends on. "1" forces it always, "0" switches it off.
+TILE_MODE = os.environ.get("TILE_SCAN", "auto").strip().lower()
+TILE_SCAN = TILE_MODE in {"1", "true", "yes", "on"}  # kept for older callers
 TILE_SIZE = int(os.environ.get("TILE_SIZE", "1200"))
 TILE_OVERLAP = int(os.environ.get("TILE_OVERLAP", "240"))
+
+# Small (far away) faces. dlib's encoder wants roughly a 150 px face; a
+# back-row face is often 60-90 px, and encoding it at that size produces a
+# vector too noisy to match. Such faces are cropped out of the ORIGINAL photo
+# and enlarged before encoding, which is the single biggest win for the back
+# of the room.
+SMALL_FACE_PX = int(os.environ.get("SMALL_FACE_PX", "110"))
+UPSCALE_FACE_PX = int(os.environ.get("UPSCALE_FACE_PX", "150"))
+MAX_UPSCALE = float(os.environ.get("MAX_UPSCALE", "4.0"))
+CROP_MARGIN = float(os.environ.get("CROP_MARGIN", "0.45"))
+# A few jittered passes average out the noise in an enlarged crop. Only paid
+# on small faces, so a front-row-only photo scans at the usual speed.
+SMALL_FACE_JITTERS = int(os.environ.get("SMALL_FACE_JITTERS", "2"))
+# Distant faces are noisier, so their best distance sits slightly higher even
+# when the identification is right. Rather than loosening the match threshold
+# (which would invent matches), widen only the review band: a far student is
+# then surfaced to the teacher for one click instead of being dropped.
+SMALL_FACE_SLACK = float(os.environ.get("SMALL_FACE_SLACK", "0.06"))
 
 # iPhones and recent Android phones shoot HEIC by default, so every layer of
 # the pipeline has to accept it: the upload form, the folder enrolment scan,
@@ -141,6 +161,12 @@ class Face:
     # Which uploaded photo this face came from. Lets the UI draw the box on the
     # right image when a session is built from several photos.
     image_index: int = 0
+    # How wide the face is in the original photo, and whether it was small
+    # enough to be enlarged before encoding. "Nobody was found there" and
+    # "somebody was found but is too far away to read" are different problems
+    # and the review screen should be able to tell them apart.
+    face_px: int = 0
+    upscaled: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -357,6 +383,133 @@ def detect_tiled(
     return merge_boxes(found)
 
 
+def should_tile(height: int, width: int) -> bool:
+    """Decide whether this photo needs full-resolution tiled detection.
+
+    Forcing tiling on every photo wastes time on a close-up of six students;
+    never tiling loses the back row of a 12 MP hall shot. So the default is
+    "auto": tile when the photo is large enough that shrinking it to MAX_EDGE
+    would throw detail away, and there is more than one tile's worth of it.
+    """
+    if TILE_MODE in {"0", "false", "no", "off"}:
+        return False
+    if TILE_SCAN:
+        return True
+    longest = max(int(height), int(width))
+    return longest > MAX_EDGE and longest > TILE_SIZE
+
+
+# ------------------------------------------------------- small (far) faces
+def crop_with_margin(
+    rgb: np.ndarray, box: tuple, margin: Optional[float] = None
+) -> tuple[np.ndarray, int, int]:
+    """Cut a face out of the photo with some room around it.
+
+    Returns (crop, x_offset, y_offset) so boxes found inside the crop can be
+    put back into whole-photo coordinates. The margin matters: dlib's encoder
+    expects to see forehead and chin, and a box cropped tight to the detection
+    encodes noticeably worse.
+    """
+    margin = CROP_MARGIN if margin is None else float(margin)
+    image = np.asarray(rgb)
+    height, width = image.shape[:2]
+    top, right, bottom, left = (int(v) for v in box)
+    pad_y = int(round((bottom - top) * margin))
+    pad_x = int(round((right - left) * margin))
+    y0 = max(0, top - pad_y)
+    x0 = max(0, left - pad_x)
+    y1 = min(height, bottom + pad_y)
+    x1 = min(width, right + pad_x)
+    return image[y0:y1, x0:x1], x0, y0
+
+
+def _upscale(crop: np.ndarray, factor: float) -> np.ndarray:
+    """Enlarge a crop with Pillow's LANCZOS filter.
+
+    Pillow rather than OpenCV on purpose: it is already a hard dependency for
+    HEIC support, so this works even where cv2 is missing.
+    """
+    from PIL import Image
+
+    image = np.asarray(crop)
+    if factor <= 1.0 or image.size == 0:
+        return image
+    height, width = image.shape[:2]
+    size = (max(1, int(round(width * factor))), max(1, int(round(height * factor))))
+    return np.asarray(Image.fromarray(image).resize(size, Image.LANCZOS))
+
+
+def encode_small_face(
+    rgb: np.ndarray, box: tuple, fr=None
+) -> Optional[np.ndarray]:
+    """Encode one distant face by enlarging it first.
+
+    dlib's encoder resizes whatever it is given to roughly 150 px internally.
+    Handing it a 70 px back-row face means it upscales a blurry thumbnail with
+    a crude filter; the resulting vector is too noisy to match reliably. Doing
+    the enlargement ourselves -- from the ORIGINAL photo, with a good filter,
+    with margin, then re-detecting so the face is properly framed -- is what
+    turns a missed back row into a matched one.
+    """
+    fr = _fr() if fr is None else fr
+    image = np.asarray(rgb)
+    top, right, bottom, left = (int(v) for v in box)
+    face_px = max(1, min(right - left, bottom - top))
+    factor = min(MAX_UPSCALE, max(1.0, UPSCALE_FACE_PX / face_px))
+
+    crop, off_x, off_y = crop_with_margin(image, box)
+    if crop.size == 0:
+        return None
+    big = _upscale(crop, factor)
+
+    inner = (
+        int(round((top - off_y) * factor)),
+        int(round((right - off_x) * factor)),
+        int(round((bottom - off_y) * factor)),
+        int(round((left - off_x) * factor)),
+    )
+    # Re-detect at the enlarged size. A box the detector draws here is better
+    # aligned than our scaled-up original, and alignment is most of encoding
+    # quality. If it finds nothing, fall back to the scaled box.
+    try:
+        found = fr.face_locations(big, number_of_times_to_upsample=0)
+    except TypeError:  # a stub or older signature
+        found = fr.face_locations(big)
+    if found:
+        inner = max(found, key=lambda b: (b[2] - b[0]) * (b[1] - b[3]))
+
+    encodings = fr.face_encodings(big, [inner], num_jitters=SMALL_FACE_JITTERS)
+    return encodings[0] if encodings else None
+
+
+def encode_boxes(rgb: np.ndarray, boxes: Sequence[tuple]) -> list[Optional[np.ndarray]]:
+    """Encode every detected face, enlarging the small ones first.
+
+    Front-row faces are encoded in one batched call exactly as before, so the
+    common case costs nothing extra. Only faces narrower than SMALL_FACE_PX
+    take the slower crop-and-enlarge path, which is a handful of faces in a
+    typical classroom photo.
+    """
+    fr = _fr()
+    image = np.asarray(rgb)
+    out: list[Optional[np.ndarray]] = [None] * len(boxes)
+
+    big_enough = [
+        i
+        for i, b in enumerate(boxes)
+        if min(int(b[1]) - int(b[3]), int(b[2]) - int(b[0])) >= SMALL_FACE_PX
+    ]
+    if big_enough:
+        encodings = fr.face_encodings(image, [tuple(boxes[i]) for i in big_enough])
+        for index, encoding in zip(big_enough, encodings):
+            out[index] = encoding
+
+    for index, box in enumerate(boxes):
+        if out[index] is None:
+            out[index] = encode_small_face(image, box, fr)
+    return out
+
+
 def encode_enrolment(image: np.ndarray) -> tuple[Optional[np.ndarray], dict]:
     """Encode the one face in an enrolment photo and report on its quality.
 
@@ -442,27 +595,46 @@ def identify(
     own name/confidence, so labels cannot be shifted onto the wrong box.
     """
     fr = _fr()
+    image = np.asarray(rgb_image)
+    height, width = image.shape[:2]
 
-    if TILE_SCAN:
+    if should_tile(height, width):
         # Full resolution, tile by tile: slower, but keeps small back-row
         # faces big enough for the detector to see them.
-        small, scale = rgb_image, 1.0
-        boxes = detect_tiled(rgb_image)
+        boxes = detect_tiled(image)
     else:
-        small, scale = _limit_size(rgb_image)
-        boxes = fr.face_locations(
+        small, scale = _limit_size(image)
+        found = fr.face_locations(
             small, number_of_times_to_upsample=UPSAMPLE, model=DETECTION_MODEL
         )
+        # Map back to original-photo coordinates immediately, so encoding and
+        # the boxes drawn in the UI both work at full detail.
+        boxes = [tuple(int(round(v / scale)) for v in box) for box in found]
     if not boxes:
         return []
-    encodings = fr.face_encodings(small, boxes)
+
+    # Small faces are cropped from the original photo and enlarged before
+    # encoding; big ones go through one batched call as before.
+    encodings = encode_boxes(image, boxes)
 
     faces: list[Face] = []
     for box, encoding in zip(boxes, encodings):
-        top, right, bottom, left = (int(v / scale) for v in box)
+        top, right, bottom, left = (int(v) for v in box)
+        face_px = max(0, min(right - left, bottom - top))
         face = Face(
-            top=top, right=right, bottom=bottom, left=left, image_index=image_index
+            top=top,
+            right=right,
+            bottom=bottom,
+            left=left,
+            image_index=image_index,
+            face_px=face_px,
+            upscaled=face_px < SMALL_FACE_PX,
         )
+        if encoding is None:
+            # Detected but unencodable -- still worth showing as a red box so
+            # the teacher knows somebody is there.
+            faces.append(face)
+            continue
 
         if len(known_matrix):
             distances = fr.face_distance(known_matrix, encoding)
@@ -470,12 +642,19 @@ def identify(
             dist = float(distances[best])
             face.distance = round(dist, 4)
             face.confidence = distance_to_confidence(dist, threshold)
+            # A distant face is noisier, so its best distance sits a little
+            # higher even when the answer is right. Widen the review band for
+            # those, never the match band: the teacher gets a suggestion to
+            # confirm instead of the app inventing a match.
+            review_limit = review_threshold + (
+                SMALL_FACE_SLACK if face.upscaled else 0.0
+            )
             if dist <= threshold:
                 face.status = "matched"
                 face.student_id = labels[best]["id"]
                 face.name = labels[best]["name"]
                 face.roll_no = labels[best]["roll_no"]
-            elif dist <= review_threshold:
+            elif dist <= review_limit:
                 # Close, but not close enough to accept on its own.
                 face.status = "review"
                 face.student_id = labels[best]["id"]
