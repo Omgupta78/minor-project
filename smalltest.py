@@ -321,6 +321,198 @@ check(
 
 recognition.TILE_MODE, recognition.TILE_SCAN = mode, forced
 
+
+section("a stranger cannot borrow an enrolled student's name")
+
+two_labels = [
+    {"id": 7, "name": "Asha", "roll_no": "12"},
+    {"id": 9, "name": "Ravi", "roll_no": "13"},
+]
+
+
+def matrix_rows(*distances: float) -> np.ndarray:
+    """One reference row per distance from the stub encoding."""
+    rows = []
+    for value in distances:
+        row = np.zeros(128)
+        row[0] = float(value)
+        rows.append(row)
+    return np.array(rows)
+
+
+# This is the failure from the real classroom photo: a face belonging to nobody
+# enrolled still has a nearest reference, and at classroom distance that
+# nearest sits in the review band. Two near-equal candidates must produce no
+# name at all.
+stub = with_stub(Stub(shape=(400, 400), boxes=[near]))
+faces = recognition.identify(room, matrix_rows(0.53, 0.56), two_labels)
+check(
+    "two equally plausible students produce no name at all",
+    faces[0].status == "unknown" and faces[0].student_id is None,
+    f"{faces[0].status} / {faces[0].name}",
+)
+check(
+    "the runner-up gap is recorded so the teacher can see why",
+    faces[0].runner_up_gap == 0.03,
+    str(faces[0].runner_up_gap),
+)
+
+stub = with_stub(Stub(shape=(400, 400), boxes=[near]))
+faces = recognition.identify(room, matrix_rows(0.53, 0.70), two_labels)
+check(
+    "a clear winner is still offered for review",
+    faces[0].status == "review" and faces[0].name == "Asha",
+    f"{faces[0].status} / {faces[0].name}",
+)
+
+# Drive the rule from the configured value rather than a hard-coded number, so
+# the test still means something if MATCH_MARGIN is tuned.
+margin = recognition.MATCH_MARGIN
+stub = with_stub(Stub(shape=(400, 400), boxes=[near]))
+faces = recognition.identify(
+    room, matrix_rows(0.53, 0.53 + margin + 0.01), two_labels
+)
+check(
+    "a gap wider than MATCH_MARGIN is enough to name a student",
+    faces[0].status == "review" and faces[0].student_id == 7,
+    f"{faces[0].status} / {faces[0].runner_up_gap}",
+)
+stub = with_stub(Stub(shape=(400, 400), boxes=[near]))
+faces = recognition.identify(
+    room, matrix_rows(0.53, 0.53 + margin - 0.01), two_labels
+)
+check(
+    "a gap narrower than MATCH_MARGIN refuses to guess",
+    faces[0].status == "unknown" and faces[0].student_id is None,
+    f"{faces[0].status} / {faces[0].runner_up_gap}",
+)
+
+# Several reference photos of one student must not veto each other.
+same_student = [
+    {"id": 7, "name": "Asha", "roll_no": "12"},
+    {"id": 7, "name": "Asha", "roll_no": "12"},
+]
+stub = with_stub(Stub(shape=(400, 400), boxes=[near]))
+faces = recognition.identify(room, matrix_rows(0.20, 0.22), same_student)
+check(
+    "two reference photos of one student are teammates, not rivals",
+    faces[0].status == "matched" and faces[0].student_id == 7,
+    f"{faces[0].status} / {faces[0].runner_up_gap}",
+)
+
+# An enlarged face is noisier, so it needs a stricter distance to be accepted
+# outright -- the same number that passes for a near face only earns a review.
+stub = with_stub(Stub(shape=(400, 400), boxes=[near, far]))
+faces = recognition.identify(room, matrix_at(0.48), labels)
+by_px = {f.face_px: f for f in faces}
+check(
+    "a near face at 0.48 is auto-marked present",
+    by_px[160].status == "matched",
+    by_px[160].status,
+)
+check(
+    "the same distance on an enlarged far face waits for review",
+    by_px[60].status == "review",
+    by_px[60].status,
+)
+
+
+section("low-resolution photos get a second enlarged pass")
+
+rescue_mode = recognition.RESCUE_MODE
+check(
+    "a small photo with no faces found is searched again",
+    recognition.should_rescue(800, 600, []) is True,
+)
+check(
+    "a small photo with tiny faces is searched again",
+    recognition.should_rescue(800, 600, [(0, 100, 100, 0)]) is True,
+)
+check(
+    "a small photo with big faces is left alone",
+    recognition.should_rescue(800, 600, [(0, 700, 700, 0)]) is False,
+)
+check(
+    "a full-resolution photo is tiled instead of enlarged",
+    recognition.should_rescue(3000, 4000, []) is False,
+)
+recognition.RESCUE_MODE = "off"
+check(
+    "RESCUE_PASS=off disables the second pass",
+    recognition.should_rescue(800, 600, []) is False,
+)
+recognition.RESCUE_MODE = "on"
+check(
+    "RESCUE_PASS=on forces it even on a huge photo",
+    recognition.should_rescue(3000, 4000, [(0, 700, 700, 0)]) is True,
+)
+recognition.RESCUE_MODE = rescue_mode
+
+stub = with_stub(Stub(shape=(400, 400), boxes=[near], crop_box=(100, 200, 200, 100)))
+found = recognition.detect_rescue(room, 2.0)
+check(
+    "the enlarged pass really searched a 2x copy of the photo",
+    stub.locate_calls[-1] == (800, 800),
+    str(stub.locate_calls),
+)
+check(
+    "boxes from the enlarged pass are mapped back to the original photo",
+    found == [(50, 100, 100, 50)],
+    str(found),
+)
+
+stub = with_stub(Stub(shape=(400, 400), boxes=[far], crop_box=(20, 120, 120, 20)))
+boxes = recognition.detect_faces(room)
+check(
+    "a face only the enlarged pass can see is added to the result",
+    len(boxes) == 2,
+    str(boxes),
+)
+check(
+    "the rescued face is reported in original-photo coordinates",
+    (10, 60, 60, 10) in [tuple(int(v) for v in b) for b in boxes],
+    str(boxes),
+)
+
+
+section("a demoted suggestion is not labelled Duplicate")
+
+
+def face_at(distance: float, status: str) -> recognition.Face:
+    return recognition.Face(
+        top=0,
+        right=100,
+        bottom=100,
+        left=0,
+        student_id=7,
+        name="Asha",
+        roll_no="12",
+        distance=distance,
+        status=status,
+    )
+
+
+strong, weak = face_at(0.30, "matched"), face_at(0.42, "matched")
+recognition.resolve_duplicates([strong, weak])
+check(
+    "a second confident claim on one student is marked Duplicate",
+    weak.status == "duplicate" and weak.name == "Duplicate",
+    f"{weak.status} / {weak.name}",
+)
+
+best, other = face_at(0.55, "review"), face_at(0.58, "review")
+recognition.resolve_duplicates([best, other])
+check(
+    "a losing suggestion becomes Unknown, not Duplicate",
+    other.status == "unknown" and other.name == "Unknown",
+    f"{other.status} / {other.name}",
+)
+check(
+    "the better suggestion keeps its name",
+    best.status == "review" and best.name == "Asha",
+    f"{best.status} / {best.name}",
+)
+
 print("\n" + "=" * 60)
 if FAILURES:
     print(f"{len(FAILURES)} check(s) failed:")
