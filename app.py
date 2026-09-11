@@ -202,72 +202,102 @@ def add_class():
 
 
 # ------------------------------------------------------------ students
+# A student can be enrolled from several photos in one go. Each photo becomes
+# a separate reference encoding, which is the single biggest accuracy win
+# available: one photo only ever captures one angle and one lighting setup.
+MAX_ENROL_PHOTOS = int(os.environ.get("MAX_ENROL_PHOTOS", "5"))
+
+
 @app.post("/add-student")
 def add_student():
     name = (request.form.get("student_name") or "").strip()
     roll_no = (request.form.get("roll_no") or "").strip()
     class_id = parse_int(request.form.get("class_id"))
-    photo = request.files.get("student_photo")
+    photos = [f for f in request.files.getlist("student_photo") if f and f.filename]
 
     if not name or not roll_no:
         flash("Name and roll number are both required.", "error")
         return redirect(url_for("students_page", class_id=class_id))
-    if photo is None or not photo.filename:
-        flash("A face photo is required.", "error")
+    if not photos:
+        flash("At least one face photo is required.", "error")
         return redirect(url_for("students_page", class_id=class_id))
-
-    ext = Path(photo.filename).suffix.lower()
-    if ext not in ALLOWED_EXTS:
+    if len(photos) > MAX_ENROL_PHOTOS:
         flash(
-            f"Unsupported image type '{ext}'. Use JPG, PNG, WEBP or HEIC.",
+            f"Only the first {MAX_ENROL_PHOTOS} photos were used.",
+            "warning",
+        )
+        photos = photos[:MAX_ENROL_PHOTOS]
+
+    encodings: list = []
+    saved: list[Path] = []
+    rejected: list[str] = []
+
+    for position, photo in enumerate(photos, start=1):
+        ext = Path(photo.filename).suffix.lower()
+        if ext not in ALLOWED_EXTS:
+            rejected.append(f"{photo.filename}: unsupported image type '{ext}'.")
+            continue
+        if ext in recognition.HEIF_EXTS and not recognition.register_heif():
+            rejected.append(
+                f"{photo.filename}: HEIC photos need the pillow-heif package. "
+                "Run 'pip install pillow-heif', or convert the photo to JPG."
+            )
+            continue
+
+        suffix = "" if position == 1 else f"_{position}"
+        filename = f"{safe_stem(roll_no)}_{safe_stem(name)}{suffix}.jpg"
+        target = FACES_DIR / filename
+
+        # Everything is stored as JPEG, whatever the teacher uploaded. HEIC
+        # from an iPhone is decoded here once, so the rest of the app never
+        # sees it again.
+        try:
+            from PIL import Image, ImageOps
+
+            recognition.register_heif()
+            image = Image.open(photo.stream)
+            image = ImageOps.exif_transpose(image)  # honour the rotation flag
+            if image.mode not in ("RGB", "L"):
+                image = image.convert("RGB")
+            image.thumbnail((1200, 1200))
+            image.convert("RGB").save(target, "JPEG", quality=90)
+        except Exception as exc:
+            rejected.append(f"{photo.filename}: could not be read ({exc}).")
+            continue
+
+        # Refuse a photo that holds no face, or one that is too small, too
+        # blurry or badly lit. Whatever is accepted here becomes a permanent
+        # reference, so a bad photo would spoil every later scan.
+        try:
+            encoding, report = recognition.encode_face_checked(target)
+        except recognition.RecognitionUnavailable as exc:
+            for path in saved + [target]:
+                path.unlink(missing_ok=True)
+            flash(str(exc), "error")
+            return redirect(url_for("students_page", class_id=class_id))
+
+        if encoding is None:
+            target.unlink(missing_ok=True)
+            rejected.append(f"{photo.filename}: {report.get('problem')}")
+            continue
+
+        encodings.append(encoding)
+        saved.append(target)
+
+    if not encodings:
+        reasons = " ".join(rejected)
+        flash(
+            f"No usable face photo for {name}. {reasons} "
+            "Use a clear, front-facing, well-lit photo.".strip(),
             "error",
         )
         return redirect(url_for("students_page", class_id=class_id))
-    if ext in recognition.HEIF_EXTS and not recognition.register_heif():
-        flash(
-            "HEIC photos need the pillow-heif package. Run "
-            "'pip install pillow-heif' in your virtual environment, or convert "
-            "the photo to JPG first.",
-            "error",
-        )
-        return redirect(url_for("students_page", class_id=class_id))
 
-    filename = f"{safe_stem(roll_no)}_{safe_stem(name)}.jpg"
-    target = FACES_DIR / filename
+    if rejected:
+        # Some photos were kept, so this is a warning rather than a failure.
+        flash(" ".join(rejected), "warning")
 
-    # Everything is stored as JPEG, whatever the teacher uploaded. HEIC from an
-    # iPhone is decoded here once, so the rest of the app never sees it again.
-    try:
-        from PIL import Image, ImageOps
-
-        recognition.register_heif()
-        image = Image.open(photo.stream)
-        image = ImageOps.exif_transpose(image)  # honour the phone's rotation flag
-        if image.mode not in ("RGB", "L"):
-            image = image.convert("RGB")
-        image.thumbnail((1200, 1200))
-        image.convert("RGB").save(target, "JPEG", quality=90)
-    except Exception as exc:
-        flash(f"Could not read that image: {exc}", "error")
-        return redirect(url_for("students_page", class_id=class_id))
-
-    # Reject the enrolment if no face can actually be encoded, instead of
-    # registering a student who could never be recognised.
-    try:
-        encoding = recognition.encode_face(target)
-    except recognition.RecognitionUnavailable as exc:
-        target.unlink(missing_ok=True)
-        flash(str(exc), "error")
-        return redirect(url_for("students_page", class_id=class_id))
-
-    if encoding is None:
-        target.unlink(missing_ok=True)
-        flash(
-            f"No face detected in the photo for {name}. "
-            "Use a clear, front-facing, well-lit photo.",
-            "error",
-        )
-        return redirect(url_for("students_page", class_id=class_id))
+    filename = saved[0].name
 
     try:
         with db.session_scope() as conn:
@@ -275,20 +305,38 @@ def add_student():
                 "SELECT id FROM students WHERE roll_no = ?", (roll_no,)
             ).fetchone()
             if existing:
+                student_id = existing["id"]
                 db.update_student(
                     conn,
-                    existing["id"],
+                    student_id,
                     name=name,
                     class_id=class_id,
                     photo_path=filename,
-                    encoding=encoding,
+                    encoding=encodings[0],
                 )
-                flash(f"Updated {name} ({roll_no}).", "success")
+                # Re-enrolling replaces the old reference photos rather than
+                # stacking new ones on top of possibly outdated ones.
+                db.clear_student_encodings(conn, student_id)
+                flash(
+                    f"Updated {name} ({roll_no}) from {len(encodings)} photo(s).",
+                    "success",
+                )
             else:
-                db.create_student(conn, roll_no, name, class_id, filename, encoding)
-                flash(f"Registered {name} ({roll_no}).", "success")
+                student_id = db.create_student(
+                    conn, roll_no, name, class_id, filename, encodings[0]
+                )
+                flash(
+                    f"Registered {name} ({roll_no}) from {len(encodings)} photo(s).",
+                    "success",
+                )
+
+            # The first encoding lives on the student row; the rest go to
+            # student_encodings and are all compared against during a scan.
+            for extra in encodings[1:]:
+                db.add_student_encoding(conn, student_id, extra)
     except sqlite3.IntegrityError as exc:
-        target.unlink(missing_ok=True)
+        for path in saved:
+            path.unlink(missing_ok=True)
         flash(f"Could not save student: {exc}", "error")
 
     return redirect(url_for("students_page", class_id=class_id))
@@ -332,7 +380,7 @@ def _images_from_request() -> tuple[list[tuple[str, object]], list[str]]:
 
     Returns (images, skipped) so the caller can still scan the good photos and
     tell the teacher which files were unreadable, rather than failing the whole
-    batch because one file was unreadable.
+    batch because one file was a HEIC or a PDF.
     """
     images: list[tuple[str, object]] = []
     skipped: list[str] = []
