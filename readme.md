@@ -98,6 +98,9 @@ python migrate_to_db.py --class "CSE 3rd Year A" --subject DBMS
 ```bash
 python selftest.py      # data layer + Excel builder, no camera needed
 python rendertest.py    # renders every template against real data
+python multitest.py     # multi-photo merge rules
+python heictest.py      # iPhone HEIC decoding + EXIF rotation
+python doctor.py        # is this folder the current build?
 ```
 
 ---
@@ -153,6 +156,7 @@ doctor.py            Reports whether this copy is the multi-photo build
 selftest.py          Smoke test for the data + report layers
 rendertest.py        Renders every template against real data
 multitest.py         Multi-photo merge checks
+heictest.py          HEIC/HEIF decoding and EXIF rotation checks
 run.sh / run.bat     One-command launchers (venv, install, open browser)
 templates/           Jinja templates (no CDN, works offline)
 static/app.css       Generated stylesheet
@@ -253,8 +257,17 @@ room. So a session accepts **several photos** and merges them into one roster.
 | `MAX_UPLOAD_MB` | `64` | Total size of one upload batch |
 
 Detection is roughly linear in photo count, so 8 large photos on the `hog` model
-take noticeably longer than one. If a file is unreadable (HEIC, PDF, corrupt),
-it is skipped and named in a warning — the remaining photos are still scanned.
+take noticeably longer than one. If a file is genuinely unreadable (a PDF, a
+corrupt download), it is skipped and named in a warning — the remaining photos
+are still scanned.
+
+**HEIC / iPhone photos.** iPhones save photos as `.heic`, which OpenCV cannot
+read at all. Uploads are therefore decoded with OpenCV first and, if that
+fails, again through Pillow with `pillow-heif` registered, which covers HEIC
+and HEIF. The EXIF orientation tag is applied at the same time, so a photo
+held sideways is straightened before detection instead of presenting the whole
+class rotated 90 degrees. `pillow-heif` is in `requirements.txt`; if it is
+missing, HEIC uploads fail with an install hint rather than a cryptic error.
 
 `POST /api/scan` now returns an `images` array (one entry per photo, each with
 its own `faces`), aggregate counts (`images_scanned`, `total_faces`, `matched`,
@@ -369,3 +382,120 @@ at your laptop's LAN IP (`ipconfig` / `ifconfig`), for example
 There is no login yet, so anyone on that network can open it — use it on a
 trusted network, and never together with `FLASK_DEBUG=1`, which would expose a
 remote code execution console.
+
+## Recognition accuracy
+
+Four things in this build exist purely to raise the hit rate. Together they
+address the two ways a classroom scan goes wrong: a student is in the photo
+but not found, or is found and given the wrong name.
+
+### 1. Several reference photos per student
+
+One enrolment photo captures one angle under one light. The enrolment form
+now accepts up to five files at once (`MAX_ENROL_PHOTOS`). Shoot the student
+front on, turned slightly left, and slightly right.
+
+Every accepted photo becomes its own reference vector. The first one lives on
+the `students` row and the rest go to the `student_encodings` table; a scan
+compares each detected face against all of them and keeps the closest. A
+student sitting side-on to the camera can now match their own side-on
+reference instead of failing against a single front-on one.
+
+Re-enrolling a student replaces their old references rather than stacking new
+ones on top of outdated ones.
+
+### 2. A quality gate on enrolment photos
+
+An enrolment photo is permanent, so a bad one quietly spoils every later scan.
+Each photo is now measured before it is accepted:
+
+| Check | Default | Env var |
+| --- | --- | --- |
+| face width in pixels | 80 | `MIN_FACE_PX` |
+| sharpness (Laplacian variance) | 25 | `MIN_SHARPNESS` |
+| brightness, too dark | 45 | `MIN_BRIGHTNESS` |
+| brightness, over-exposed | 225 | `MAX_BRIGHTNESS` |
+
+A photo that fails is rejected with the reason shown on screen ("too blurry",
+"only 46 pixels across", "too dark"). If some photos pass and others fail, the
+student is still enrolled from the good ones and you are told which were
+dropped.
+
+### 3. Jittered enrolment encodings
+
+Enrolment encodes each face `ENROL_JITTERS` times (default 10) with small
+random shifts and averages the result. It is roughly ten times slower than a
+single pass, which is irrelevant for a one-off enrolment, and it produces a
+noticeably more stable reference vector. Scanning still uses a single pass, so
+taking attendance is not slowed down.
+
+### 4. Tiled detection for back rows
+
+A whole-class photo is downscaled to `MAX_EDGE` before detection, which can
+shrink a back-row face below the detector's minimum size. With tiling on, the
+photo is instead searched in overlapping `TILE_SIZE` windows at full
+resolution, and duplicate detections from the overlaps are merged.
+
+```
+set TILE_SCAN=1        # Windows
+export TILE_SCAN=1     # macOS / Linux
+```
+
+It is off by default because it multiplies scan time by the number of tiles.
+Turn it on for a wide room, or when the back two rows are being missed.
+
+### Measuring it, rather than guessing
+
+`accuracy.py` reports real numbers instead of an impression. Build a folder of
+photos the app has never seen, one sub-folder per roll number:
+
+```
+testset/
+    CS-2024001/  img1.jpg  img2.jpg
+    CS-2024002/  img3.jpg
+    unknown/     visitor.jpg
+```
+
+The optional `unknown/` folder holds people who are **not** enrolled. It is
+the important part: without it you only measure whether students are found,
+never whether the app invents them, and marking an absent student present is
+the worse failure.
+
+```
+python accuracy.py --folder testset --class-id 1
+```
+
+It prints precision, recall and F1, a histogram of match distances, and a
+sweep of `MATCH_DISTANCE` from 0.35 to 0.70 with a recommended value for your
+class. Two clear humps in the histogram means the thresholds have an easy job;
+one smeared hump means the enrolment photos are the problem and no threshold
+will save you.
+
+Run it once before enrolling extra photos and once after, and you have a
+defensible sentence for the report.
+
+### New configuration summary
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MAX_ENROL_PHOTOS` | 5 | photos accepted per student per enrolment |
+| `ENROL_JITTERS` | 10 | jittered passes when encoding a reference |
+| `MIN_FACE_PX` | 80 | smallest usable face width |
+| `MIN_SHARPNESS` | 25 | blur cutoff |
+| `MIN_BRIGHTNESS` | 45 | darkness cutoff |
+| `MAX_BRIGHTNESS` | 225 | over-exposure cutoff |
+| `TILE_SCAN` | 0 | set to 1 for full-resolution tiled detection |
+| `TILE_SIZE` | 1200 | tile edge in pixels |
+| `TILE_OVERLAP` | 240 | overlap so faces on a seam are not lost |
+
+### Tests
+
+```
+python qualitytest.py   # 47 checks over the accuracy work
+python selftest.py      # core logic
+python multitest.py     # multi-photo sessions
+python doctor.py        # 26 checks: is this folder the current build?
+```
+
+`qualitytest.py` stubs out `face_recognition`, so it runs on a machine without
+dlib, OpenCV or Flask installed.
