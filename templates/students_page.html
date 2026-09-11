@@ -171,10 +171,11 @@
         <input id="s-name" type="text" name="student_name" required placeholder="e.g. Ravi Kumar" class="w-full border-bdr rounded-lg px-3 py-2 text-sm focus:ring-primary focus:border-primary"/>
       </div>
       <div>
-        <label for="s-photo" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Face Photo</label>
-        <input id="s-photo" type="file" name="student_photo" accept="image/*,.heic,.heif" required
+        <label for="s-photo" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Face Photos</label>
+        <input id="s-photo" type="file" name="student_photo" accept="image/*,.heic,.heif" multiple required
                class="w-full text-sm text-txt-m file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-light file:text-primary hover:file:bg-blue-100 cursor-pointer"/>
-        <p class="text-[11px] text-txt-f mt-1.5">The upload is rejected if no face can be detected, so a student is never enrolled with unusable data.</p>
+        <p class="text-[11px] text-txt-f mt-1.5">Select up to 5 photos at once &mdash; front on, turned slightly left, slightly right. Every photo becomes a reference the scan can match against, so more angles means fewer missed students.</p>
+        <p class="text-[11px] text-txt-f mt-1">Photos that hold no face, or are too small, blurry or badly lit are rejected with a reason, so a student is never enrolled with unusable data.</p>
       </div>
       <button type="submit" class="w-full bg-primary hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition-colors">Save Student</button>
     </form>
