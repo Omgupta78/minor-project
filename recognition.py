@@ -39,6 +39,25 @@ UPSAMPLE = int(os.environ.get("FACE_UPSAMPLE", "1"))
 DETECTION_MODEL = os.environ.get("FACE_MODEL", "hog")  # "cnn" is slower/better
 MAX_EDGE = int(os.environ.get("MAX_EDGE", "1600"))     # cap for very large photos
 
+# Enrolment encoding quality. num_jitters averages the embedding over several
+# slightly perturbed crops of the same face, which gives a cleaner reference
+# vector. The cost is paid once, at enrolment, never during a scan.
+ENROL_JITTERS = int(os.environ.get("ENROL_JITTERS", "10"))
+
+# Thresholds for refusing a bad enrolment photo. Whatever is accepted here
+# becomes the permanent reference for that student, so every future scan
+# inherits its faults. Refusing the upload is cheaper than debugging later.
+MIN_FACE_PX = int(os.environ.get("MIN_FACE_PX", "80"))
+MIN_SHARPNESS = float(os.environ.get("MIN_SHARPNESS", "25"))
+MIN_BRIGHTNESS = float(os.environ.get("MIN_BRIGHTNESS", "45"))
+MAX_BRIGHTNESS = float(os.environ.get("MAX_BRIGHTNESS", "225"))
+
+# Tiled detection. Off by default because it is slower; turn it on when back
+# rows are being missed in wide classroom photos.
+TILE_SCAN = os.environ.get("TILE_SCAN", "0") == "1"
+TILE_SIZE = int(os.environ.get("TILE_SIZE", "1200"))
+TILE_OVERLAP = int(os.environ.get("TILE_OVERLAP", "240"))
+
 # iPhones and recent Android phones shoot HEIC by default, so every layer of
 # the pipeline has to accept it: the upload form, the folder enrolment scan,
 # and the byte decoder used by /api/scan.
@@ -191,22 +210,204 @@ def _limit_size(rgb: np.ndarray) -> tuple[np.ndarray, float]:
     return resized, scale
 
 
+# ------------------------------------------------------------ photo quality
+def sharpness_of(image: np.ndarray) -> float:
+    """Variance of the Laplacian, the standard cheap blur score.
+
+    A sharp face has strong edges, so the second derivative varies a lot. A
+    blurred one is smooth, so the variance collapses toward zero.
+    """
+    gray = np.asarray(image, dtype=np.float64)
+    if gray.ndim == 3:
+        gray = gray.mean(axis=2)
+    if gray.shape[0] < 3 or gray.shape[1] < 3:
+        return 0.0
+    laplacian = (
+        -4.0 * gray[1:-1, 1:-1]
+        + gray[:-2, 1:-1]
+        + gray[2:, 1:-1]
+        + gray[1:-1, :-2]
+        + gray[1:-1, 2:]
+    )
+    return float(laplacian.var())
+
+
+def assess_face(rgb: np.ndarray, box: tuple) -> dict:
+    """Measure face size, sharpness and brightness inside one detection box."""
+    top, right, bottom, left = (int(v) for v in box)
+    crop = np.asarray(rgb)[max(top, 0) : max(bottom, 0), max(left, 0) : max(right, 0)]
+    if crop.size == 0:
+        return {"face_px": 0, "sharpness": 0.0, "brightness": 0.0}
+    return {
+        "face_px": int(min(right - left, bottom - top)),
+        "sharpness": round(sharpness_of(crop), 2),
+        "brightness": round(float(np.asarray(crop, dtype=np.float64).mean()), 1),
+    }
+
+
+def quality_problem(report: dict) -> Optional[str]:
+    """Plain-English reason to reject an enrolment photo, or None if usable."""
+    face_px = report.get("face_px", 0)
+    if face_px < MIN_FACE_PX:
+        return (
+            f"The face is only {face_px} pixels across; at least {MIN_FACE_PX} "
+            "is needed. Move closer or crop the photo to the student."
+        )
+    if report.get("sharpness", 0.0) < MIN_SHARPNESS:
+        return "The photo is too blurry. Hold the camera steady and retake it."
+    brightness = report.get("brightness", 0.0)
+    if brightness < MIN_BRIGHTNESS:
+        return "The photo is too dark. Face a window or switch a light on."
+    if brightness > MAX_BRIGHTNESS:
+        return (
+            "The photo is over-exposed. Avoid a bright window or light "
+            "directly behind the student."
+        )
+    return None
+
+
+# --------------------------------------------------------- tiled detection
+def tile_windows(
+    height: int,
+    width: int,
+    tile: Optional[int] = None,
+    overlap: Optional[int] = None,
+) -> list[tuple[int, int, int, int]]:
+    """Split an image into overlapping (x, y, w, h) windows.
+
+    Detecting inside full-resolution tiles finds the small back-row faces that
+    vanish when the whole photo is shrunk to MAX_EDGE. The overlap stops a
+    face sitting on a tile boundary from being cut in half by both tiles.
+    """
+    tile = TILE_SIZE if tile is None else int(tile)
+    overlap = TILE_OVERLAP if overlap is None else int(overlap)
+    tile = max(64, tile)
+    overlap = max(0, min(overlap, tile - 1))
+    if height <= tile and width <= tile:
+        return [(0, 0, width, height)]
+
+    step = max(1, tile - overlap)
+
+    def starts(total: int) -> list[int]:
+        if total <= tile:
+            return [0]
+        out = list(range(0, total - tile + 1, step))
+        if out[-1] + tile < total:
+            out.append(total - tile)  # flush the last window to the edge
+        return out
+
+    return [
+        (x, y, min(tile, width), min(tile, height))
+        for y in starts(height)
+        for x in starts(width)
+    ]
+
+
+def _overlap_ratio(a: tuple, b: tuple) -> float:
+    """Intersection over the smaller box.
+
+    Two tiles that both see the same face return near-identical boxes, so
+    "mostly contained in" is the useful test rather than plain IoU.
+    """
+    a_top, a_right, a_bottom, a_left = a
+    b_top, b_right, b_bottom, b_left = b
+    inner_h = max(0, min(a_bottom, b_bottom) - max(a_top, b_top))
+    inner_w = max(0, min(a_right, b_right) - max(a_left, b_left))
+    inner = inner_h * inner_w
+    if inner <= 0:
+        return 0.0
+    smaller = min(
+        (a_bottom - a_top) * (a_right - a_left),
+        (b_bottom - b_top) * (b_right - b_left),
+    )
+    return inner / smaller if smaller > 0 else 0.0
+
+
+def merge_boxes(boxes: Sequence[tuple], threshold: float = 0.4) -> list[tuple]:
+    """Drop duplicate detections coming from overlapping tiles.
+
+    Boxes are considered largest-first so the fuller view of a face survives,
+    then returned in reading order (top to bottom, left to right).
+    """
+    kept: list[tuple] = []
+    for box in sorted(
+        boxes, key=lambda b: (b[2] - b[0]) * (b[1] - b[3]), reverse=True
+    ):
+        if all(_overlap_ratio(box, other) < threshold for other in kept):
+            kept.append(box)
+    return sorted(kept, key=lambda b: (b[0], b[3]))
+
+
+def detect_tiled(
+    rgb: np.ndarray,
+    tile: Optional[int] = None,
+    overlap: Optional[int] = None,
+) -> list[tuple]:
+    """Detect faces tile by tile at full resolution, in whole-image coords."""
+    fr = _fr()
+    image = np.asarray(rgb)
+    height, width = image.shape[:2]
+    found: list[tuple] = []
+    for x, y, window_w, window_h in tile_windows(height, width, tile, overlap):
+        crop = image[y : y + window_h, x : x + window_w]
+        for top, right, bottom, left in fr.face_locations(
+            crop, number_of_times_to_upsample=UPSAMPLE, model=DETECTION_MODEL
+        ):
+            found.append((top + y, right + x, bottom + y, left + x))
+    return merge_boxes(found)
+
+
+def encode_enrolment(image: np.ndarray) -> tuple[Optional[np.ndarray], dict]:
+    """Encode the one face in an enrolment photo and report on its quality.
+
+    Returns (encoding, report). The encoding is None whenever the photo is not
+    good enough to become a reference, and report["problem"] then holds a
+    message that can be shown straight to the teacher.
+    """
+    fr = _fr()
+    image = np.asarray(image)
+    boxes = fr.face_locations(image, number_of_times_to_upsample=1)
+    report: dict = {
+        "faces": len(boxes),
+        "face_px": 0,
+        "sharpness": 0.0,
+        "brightness": round(float(image.astype(np.float64).mean()), 1),
+        "problem": None,
+    }
+    if not boxes:
+        report["problem"] = "No face was found in this photo."
+        return None, report
+    if len(boxes) > 1:
+        # Enrolment photos should hold one face; use the largest if not.
+        boxes = [max(boxes, key=lambda b: (b[2] - b[0]) * (b[1] - b[3]))]
+
+    report.update(assess_face(image, boxes[0]))
+    report["problem"] = quality_problem(report)
+    if report["problem"]:
+        return None, report
+
+    encodings = fr.face_encodings(image, boxes, num_jitters=ENROL_JITTERS)
+    if not encodings:
+        report["problem"] = "The face could not be encoded. Try a different photo."
+        return None, report
+    return encodings[0], report
+
+
+def encode_face_checked(
+    image_path: os.PathLike | str,
+) -> tuple[Optional[np.ndarray], dict]:
+    """encode_enrolment for a file on disk, quality report included."""
+    return encode_enrolment(load_image(str(image_path)))
+
+
 def encode_face(image_path: os.PathLike | str) -> Optional[np.ndarray]:
     """Return the 128-D encoding of the single face in an enrolment photo.
 
     Returns None when no face is found, so the caller can reject the upload
     instead of silently registering a student who can never be recognised.
     """
-    fr = _fr()
-    image = load_image(str(image_path))
-    boxes = fr.face_locations(image, number_of_times_to_upsample=1)
-    if not boxes:
-        return None
-    if len(boxes) > 1:
-        # Enrolment photos should hold one face; use the largest if not.
-        boxes = [max(boxes, key=lambda b: (b[2] - b[0]) * (b[1] - b[3]))]
-    encodings = fr.face_encodings(image, boxes)
-    return encodings[0] if encodings else None
+    encoding, _report = encode_face_checked(image_path)
+    return encoding
 
 
 def encode_faces_in_folder(folder: os.PathLike | str):
@@ -242,10 +443,16 @@ def identify(
     """
     fr = _fr()
 
-    small, scale = _limit_size(rgb_image)
-    boxes = fr.face_locations(
-        small, number_of_times_to_upsample=UPSAMPLE, model=DETECTION_MODEL
-    )
+    if TILE_SCAN:
+        # Full resolution, tile by tile: slower, but keeps small back-row
+        # faces big enough for the detector to see them.
+        small, scale = rgb_image, 1.0
+        boxes = detect_tiled(rgb_image)
+    else:
+        small, scale = _limit_size(rgb_image)
+        boxes = fr.face_locations(
+            small, number_of_times_to_upsample=UPSAMPLE, model=DETECTION_MODEL
+        )
     if not boxes:
         return []
     encodings = fr.face_encodings(small, boxes)
