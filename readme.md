@@ -16,10 +16,10 @@ College minor project: Python + Flask + face_recognition (dlib) + SQLite + openp
   1 photo per student       teacher photographs class     Excel workbook
         |                             |                        |
    detect 1 face              detect all faces           4 sheets:
-        |                             |                   - Summary (%)
-   128-D encoding             128-D encoding each         - Register grid
-        |                             |                   - Detailed records
-   store in SQLite  ------->  compare to enrolled         - Session log
+        |                             |                    - Summary (%)
+   128-D encoding             128-D encoding each          - Register grid
+        |                             |                    - Detailed records
+   store in SQLite  ------->  compare to enrolled          - Session log
                               (Euclidean distance)
                                       |
                             TEACHER REVIEWS & CONFIRMS
@@ -67,7 +67,7 @@ git clone https://github.com/Omgupta78/minor-project.git
 cd minor-project
 
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
 
 pip install -r requirements.txt
 ```
@@ -129,6 +129,7 @@ All optional, set as environment variables:
 | `FACES_DIR` | `faces` | Where enrolment photos are stored |
 | `MATCH_DISTANCE` | `0.50` | Distance at or below which a face auto-matches (lower = stricter) |
 | `REVIEW_DISTANCE` | `0.60` | Between this and `MATCH_DISTANCE`, the match is flagged for review |
+| `MATCH_MARGIN` | `0.06` | How far ahead the best student must be before a name is written |
 | `FACE_MODEL` | `hog` | `hog` (fast, CPU) or `cnn` (accurate, needs GPU) |
 | `FACE_UPSAMPLE` | `1` | Raise to `2` to find smaller back-row faces (slower) |
 | `MAX_EDGE` | `1600` | Class photos are downscaled to this longest edge before detection |
@@ -139,7 +140,7 @@ All optional, set as environment variables:
 
 Most of this is now automatic (see "Far-away students" below). If the back rows
 are still being missed, in order of effect: get closer or use a higher-resolution
-camera, set `FACE_UPSAMPLE=2`, force `TILE_SCAN=1`, lower `SMALL_FACE_PX` handling
+camera, set `FACE_UPSAMPLE=2`, force `TILE_SCAN=1` and `RESCUE_PASS=1`, lower `SMALL_FACE_PX` handling
 by raising `UPSCALE_FACE_PX` to `180`, or take two photos (front half, back half)
 in the same session.
 
@@ -224,7 +225,7 @@ room. So a session accepts **several photos** and merges them into one roster.
    in the camera modal). A good pattern is left half / right half / back row.
 3. Press **Identify students**. Every photo is scanned, then results are merged.
 4. The thumbnail strip shows how many faces were found in each photo. Click a
-   thumbnail to see its boxes; click “photo 2” next to a student to jump to the
+   thumbnail to see its boxes; click "photo 2" next to a student to jump to the
    shot they were recognised in.
 5. Review, correct, and confirm. Only then is anything written to the database.
 
@@ -235,7 +236,7 @@ room. So a session accepts **several photos** and merges them into one roster.
 - Across photos, every student is credited with their **single best sighting**
   (lowest face distance). Other sightings are tagged `repeat` and shown in blue.
 - A student is therefore **counted once**, no matter how many photos they appear
-  in — attendance totals cannot be inflated by uploading more pictures.
+  in - attendance totals cannot be inflated by uploading more pictures.
 - Because only the best sighting is kept, adding a photo can only ever *raise* a
   student's confidence, never lower it. A blurry extra shot is harmless.
 - Students seen only at `review` confidence stay unchecked and are flagged for
@@ -246,7 +247,7 @@ room. So a session accepts **several photos** and merges them into one roster.
 | Colour | Meaning |
 | --- | --- |
 | Green | Identified confidently |
-| Amber | Recognised but below threshold — confirm manually |
+| Amber | Recognised but below threshold - confirm manually |
 | Blue | Same student, already counted from a better photo |
 | Grey | Duplicate box within one photo |
 | Red | Face detected but not matched to any enrolled student |
@@ -260,7 +261,7 @@ room. So a session accepts **several photos** and merges them into one roster.
 
 Detection is roughly linear in photo count, so 8 large photos on the `hog` model
 take noticeably longer than one. If a file is genuinely unreadable (a PDF, a
-corrupt download), it is skipped and named in a warning — the remaining photos
+corrupt download), it is skipped and named in a warning - the remaining photos
 are still scanned.
 
 **HEIC / iPhone photos.** iPhones save photos as `.heic`, which OpenCV cannot
@@ -278,7 +279,7 @@ each student carries the `confidence` and `photo` number of their best sighting.
 The old single-`photo` field is still accepted, so nothing that worked before
 breaks.
 
-**Tests:** `python3 multitest.py` covers the merge layer — single-count
+**Tests:** `python3 multitest.py` covers the merge layer - single-count
 guarantees, best-sighting selection, repeat tagging, and empty inputs.
 
 ---
@@ -305,7 +306,7 @@ python3 build_css.py
 
 It scans `templates/*.html`, collects every utility class (including ones built
 inside JavaScript strings and Jinja ternaries), and writes CSS for exactly those
-— currently ~230 rules in about 12 KB. If a class is used that the generator
+- currently ~230 rules in about 12 KB. If a class is used that the generator
 does not understand, it is listed in the output so it can be added to the rules
 table in `build_css.py`. No node, no npm, no build pipeline.
 
@@ -345,7 +346,7 @@ dlib; later runs start in seconds.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
 pip install -r requirements.txt
 python app.py
 ```
@@ -381,7 +382,7 @@ PORT=8000 python app.py          # http://127.0.0.1:8000
 **Demoing from a phone.** `HOST=0.0.0.0 python app.py` makes the app reachable
 at your laptop's LAN IP (`ipconfig` / `ifconfig`), for example
 `http://192.168.1.7:5000`, so a phone on the same wifi can take the photos.
-There is no login yet, so anyone on that network can open it — use it on a
+There is no login yet, so anyone on that network can open it - use it on a
 trusted network, and never together with `FLASK_DEBUG=1`, which would expose a
 remote code execution console.
 
@@ -444,7 +445,7 @@ the detail the back row depends on, so a close-up of six students is still
 scanned at the old speed while a 12 MP hall shot gets the full treatment.
 
 ```
-set TILE_SCAN=1        # Windows  - force it on for every photo
+set TILE_SCAN=1        # Windows - force it on for every photo
 export TILE_SCAN=0     # macOS / Linux - switch it off entirely
 ```
 
@@ -488,6 +489,46 @@ Two honesty notes, because this is a marks-carrying record:
 Enlarging pixels cannot add detail that the camera never captured. Below roughly
 40 px a face is genuinely unrecoverable, and the honest answer is a closer photo,
 not a bigger upscale factor.
+
+### 6. Refusing to guess between two look-alike students
+
+Recognition used to name whichever enrolled student was nearest, even when the
+second-nearest was practically as close. In a class photo that produces the worst
+kind of error: a confident label on the wrong person, or on a visitor who is not
+enrolled at all.
+
+Two rules now stand in the way.
+
+1. **A runner-up margin.** The best candidate must beat the second-best by at
+   least `MATCH_MARGIN` (0.06). If two students are equally plausible, the face
+   is sent to review instead of being named, and the gap is reported per face as
+   `runner_up_gap` so you can see why.
+2. **A stricter bar for enlarged faces.** A face that had to be cropped and
+   blown up is less trustworthy, so its match threshold is tightened by
+   `SMALL_FACE_PENALTY` (0.04) while its review band stays wide.
+
+A face that loses a duplicate contest is now labelled **Unknown** rather than
+**Duplicate**, because "duplicate" wrongly implies the app knows who the person
+is. In every one of these cases `student_id` and `roll_no` are cleared, so a
+rejected guess can never reach the attendance register.
+
+The practical consequence is worth stating plainly: with only part of the class
+enrolled you will see **more** Unknowns than before, not fewer. That is the
+correct behaviour. An unnamed face costs one manual tick; a wrongly named face
+corrupts the record.
+
+### 7. A second, enlarged pass for low-resolution photos
+
+Screenshots, WhatsApp forwards and social-media re-uploads arrive small, and
+every face in them is below the detector's comfortable size. When a photo looks
+like this - few faces found relative to its dimensions - `should_rescue` triggers
+a second detection pass on a copy enlarged by `RESCUE_UPSCALE` (2x), and the two
+sets of boxes are merged with overlaps removed. Set `RESCUE_PASS=0` to switch it
+off, or `1` to force it.
+
+This recovers faces that would otherwise be invisible, but it cannot invent
+detail that the file never contained. Always scan the original camera photo
+rather than a screenshot of it.
 
 ### Measuring it, rather than guessing
 
@@ -538,16 +579,20 @@ defensible sentence for the report.
 | `CROP_MARGIN` | 0.45 | margin kept around a face when cropping it out |
 | `SMALL_FACE_JITTERS` | 2 | jittered passes when encoding an enlarged face |
 | `SMALL_FACE_SLACK` | 0.06 | extra **review** band for far faces (never match) |
+| `MATCH_MARGIN` | 0.06 | lead the best student needs over the runner-up to be named |
+| `SMALL_FACE_PENALTY` | 0.04 | stricter match bar applied to enlarged (far) faces |
+| `RESCUE_PASS` | `auto` | `auto` re-scans low-resolution photos enlarged; `1` always, `0` never |
+| `RESCUE_UPSCALE` | 2.0 | how much the whole photo is enlarged on the rescue pass |
 
 ### Tests
 
 ```
-python smalltest.py     # 35 checks over far-away / small faces
+python smalltest.py     # 56 checks over far faces, false matches, rescue pass
 python qualitytest.py   # 60 checks over the accuracy work
 python selftest.py      # core logic
 python multitest.py     # multi-photo sessions
 python heictest.py      # iPhone HEIC decoding
-python doctor.py        # 32 checks: is this folder the current build?
+python doctor.py        # 38 checks: is this folder the current build?
 ```
 
 All of these stub out `face_recognition`, so they run on a machine without
