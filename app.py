@@ -24,6 +24,8 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
+from functools import wraps
+
 from flask import (
     Flask,
     abort,
@@ -34,10 +36,12 @@ from flask import (
     request,
     send_file,
     send_from_directory,
+    session,
     url_for,
 )
 from werkzeug.utils import secure_filename
 
+import auth
 import db
 import excel_report
 import recognition
@@ -59,9 +63,31 @@ app = Flask(__name__)
 # cameras produce 4-8 MB each, so this is a batch budget rather than per-file.
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "64"))
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
-app.secret_key = os.environ.get("SECRET_KEY", os.urandom(24).hex())
 
-db.init_db()
+# The signing key for the login cookie. A random fallback is fine for a single
+# laptop, but on a server it would log everybody out on every restart and would
+# differ between workers, so a real deployment must set SECRET_KEY.
+SECRET_KEY = os.environ.get("SECRET_KEY", "")
+if not SECRET_KEY:
+    SECRET_KEY = os.urandom(32).hex()
+    print(
+        "  WARNING: SECRET_KEY is not set, so a temporary one was generated.\n"
+        "           Everyone will be logged out when this process restarts.\n"
+        "           Set SECRET_KEY before deploying for more than one teacher."
+    )
+app.secret_key = SECRET_KEY
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,   # JavaScript cannot read the login cookie
+    SESSION_COOKIE_SAMESITE="Lax",  # blocks the simplest cross-site attempts
+    # Send the cookie over HTTPS only. Defaults on, because a public hosting
+    # platform terminates TLS for you; turn it off for plain-http localhost.
+    SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "1") == "1",
+)
+
+_migrations = db.init_db()
+for _step in _migrations or []:
+    print(f"  migrated: {_step}")
 
 
 # --------------------------------------------------------------- helpers
@@ -82,16 +108,172 @@ def parse_int(value, default=None):
         return default
 
 
+# ------------------------------------------------------------------ accounts
+# Endpoints reachable without logging in. Everything else is private, enforced
+# by one before_request hook rather than a decorator on each route: forgetting
+# a decorator silently exposes a route, whereas forgetting to whitelist one
+# merely makes it ask for a login.
+PUBLIC_ENDPOINTS = {"login", "signup", "logout", "static", "healthz"}
+
+
+def teacher_id():
+    """The logged-in teacher's id, or None."""
+    return session.get("teacher_id")
+
+
+def current_teacher():
+    tid = teacher_id()
+    if tid is None:
+        return None
+    with get_db() as conn:
+        return auth.get_teacher(conn, tid)
+
+
+@app.before_request
+def require_login():
+    if request.endpoint in PUBLIC_ENDPOINTS:
+        return None
+    if teacher_id() is not None:
+        # The account could have been deleted or deactivated mid-session.
+        if current_teacher() is not None:
+            return None
+        session.clear()
+
+    # A fetch() call must get JSON back. Redirecting an API request to the
+    # login page produces HTML that the frontend cannot parse, and the error
+    # the teacher sees would be a JSON parse failure instead of 'please log in'.
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Your session has expired. Please log in again."}), 401
+    return redirect(url_for("login", next=request.path))
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        teacher = current_teacher()
+        if teacher is None or not teacher["is_admin"]:
+            abort(403)
+        return view(*args, **kwargs)
+
+    return wrapper
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    """Create a teacher account.
+
+    ALLOW_SIGNUP=0 closes registration after the staff of one school have
+    signed up, so a public URL does not accumulate strangers.
+    """
+    open_signup = os.environ.get("ALLOW_SIGNUP", "1") == "1"
+    with get_db() as conn:
+        first_ever = auth.count_teachers(conn) == 0
+    if not open_signup and not first_ever:
+        flash("Registration is closed on this server. Ask your admin for an account.", "error")
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        email = request.form.get("email", "")
+        name = request.form.get("name", "")
+        password = request.form.get("password", "")
+        try:
+            with db.session_scope() as conn:
+                new_id = auth.create_teacher(conn, email, name, password)
+        except auth.AuthError as exc:
+            flash(str(exc), "error")
+            return render_template("signup.html", email=email, name=name, first_ever=first_ever)
+        session.clear()
+        session["teacher_id"] = new_id
+        session.permanent = True
+        flash("Welcome. Start by creating a class and enrolling your students.", "success")
+        return redirect(url_for("index"))
+
+    return render_template("signup.html", email="", name="", first_ever=first_ever)
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    with get_db() as conn:
+        no_accounts = auth.count_teachers(conn) == 0
+    if no_accounts:
+        return redirect(url_for("signup"))
+
+    if request.method == "POST":
+        email = request.form.get("email", "")
+        password = request.form.get("password", "")
+        with db.session_scope() as conn:
+            row = auth.authenticate(conn, email, password)
+            teacher = dict(row) if row is not None else None
+        if teacher is None:
+            # One message for both causes, so the form cannot be used to find
+            # out which email addresses have accounts.
+            flash("That email and password do not match.", "error")
+            return render_template("login.html", email=email)
+        session.clear()
+        session["teacher_id"] = teacher["id"]
+        session.permanent = True
+
+        # Only follow a same-site relative path, never an absolute URL from
+        # the query string, which is the classic open-redirect mistake.
+        destination = request.args.get("next") or ""
+        if not destination.startswith("/") or destination.startswith("//"):
+            destination = url_for("index")
+        return redirect(destination)
+
+    return render_template("login.html", email="")
+
+
+@app.route("/logout", methods=["GET", "POST"])
+def logout():
+    session.clear()
+    flash("You are logged out.", "success")
+    return redirect(url_for("login"))
+
+
+@app.post("/account/password")
+def change_own_password():
+    try:
+        with db.session_scope() as conn:
+            auth.change_password(
+                conn,
+                teacher_id(),
+                request.form.get("current_password", ""),
+                request.form.get("new_password", ""),
+            )
+    except auth.AuthError as exc:
+        flash(str(exc), "error")
+        return redirect(request.referrer or url_for("index"))
+    flash("Password changed.", "success")
+    return redirect(request.referrer or url_for("index"))
+
+
+@app.get("/healthz")
+def healthz():
+    """Liveness probe for the hosting platform. No data, no login."""
+    return jsonify({"ok": True})
+
+
 @app.context_processor
 def inject_globals():
+    tid = teacher_id()
+    if tid is None:
+        return {
+            "nav_classes": [],
+            "student_total": 0,
+            "today": date.today().isoformat(),
+            "match_threshold": recognition.MATCH_DISTANCE,
+            "teacher": None,
+        }
     with get_db() as conn:
-        classes = db.list_classes(conn)
-        student_total = len(db.list_students(conn))
+        classes = db.list_classes(conn, teacher_id=tid)
+        student_total = len(db.list_students(conn, teacher_id=tid))
+        teacher = auth.get_teacher(conn, tid)
     return {
         "nav_classes": classes,
         "student_total": student_total,
         "today": date.today().isoformat(),
         "match_threshold": recognition.MATCH_DISTANCE,
+        "teacher": teacher,
     }
 
 
@@ -108,14 +290,20 @@ def too_large(_):
 # ----------------------------------------------------------------- pages
 @app.route("/")
 def index():
+    tid = teacher_id()
     class_id = parse_int(request.args.get("class_id"))
     with get_db() as conn:
-        classes = db.list_classes(conn)
+        classes = db.list_classes(conn, teacher_id=tid)
+        # A class_id in the query string is untrusted input: without this
+        # check, editing the number in the address bar would show another
+        # teacher's class.
+        if class_id is not None and not auth.owns_class(conn, tid, class_id):
+            abort(404)
         if class_id is None and classes:
             class_id = classes[0]["id"]
-        students = db.list_students(conn, class_id) if class_id else []
-        stats = db.dashboard_stats(conn, class_id)
-        recent = db.list_sessions(conn, class_id, limit=5)
+        students = db.list_students(conn, class_id, teacher_id=tid) if class_id else []
+        stats = db.dashboard_stats(conn, class_id, teacher_id=tid)
+        recent = db.list_sessions(conn, class_id, limit=5, teacher_id=tid)
     return render_template(
         "index.html",
         active_page="dashboard",
@@ -129,11 +317,17 @@ def index():
 
 @app.route("/students_page")
 def students_page():
+    tid = teacher_id()
     class_id = parse_int(request.args.get("class_id"))
     with get_db() as conn:
-        classes = db.list_classes(conn)
-        students = db.list_students(conn, class_id)
-        summary = {s["id"]: s for s in db.attendance_summary(conn, class_id)}
+        if class_id is not None and not auth.owns_class(conn, tid, class_id):
+            abort(404)
+        classes = db.list_classes(conn, teacher_id=tid)
+        students = db.list_students(conn, class_id, teacher_id=tid)
+        summary = {
+            s["id"]: s
+            for s in db.attendance_summary(conn, class_id, teacher_id=tid)
+        }
     return render_template(
         "students_page.html",
         active_page="students",
@@ -146,14 +340,17 @@ def students_page():
 
 @app.route("/records")
 def records():
+    tid = teacher_id()
     class_id = parse_int(request.args.get("class_id"))
     start = request.args.get("start") or None
     end = request.args.get("end") or None
     with get_db() as conn:
-        classes = db.list_classes(conn)
-        sessions = db.list_sessions(conn, class_id, start, end)
-        summary = db.attendance_summary(conn, class_id, start, end)
-        stats = db.dashboard_stats(conn, class_id)
+        if class_id is not None and not auth.owns_class(conn, tid, class_id):
+            abort(404)
+        classes = db.list_classes(conn, teacher_id=tid)
+        sessions = db.list_sessions(conn, class_id, start, end, teacher_id=tid)
+        summary = db.attendance_summary(conn, class_id, start, end, teacher_id=tid)
+        stats = db.dashboard_stats(conn, class_id, teacher_id=tid)
     return render_template(
         "records.html",
         active_page="records",
@@ -169,12 +366,15 @@ def records():
 
 @app.route("/records/<int:session_id>")
 def session_detail(session_id: int):
+    tid = teacher_id()
     with get_db() as conn:
         sess = db.get_session(conn, session_id)
-        if sess is None:
+        # 404 rather than 403 for someone else's session: a 403 would confirm
+        # that the session exists, which is itself information.
+        if sess is None or not auth.owns_session(conn, tid, session_id):
             abort(404)
         rows = db.session_rows(conn, session_id)
-        classes = db.list_classes(conn)
+        classes = db.list_classes(conn, teacher_id=tid)
     present = sum(1 for r in rows if r["status"] in ("present", "late"))
     return render_template(
         "session_detail.html",
@@ -196,7 +396,7 @@ def add_class():
         flash("Class name is required.", "error")
         return redirect(request.referrer or url_for("students_page"))
     with db.session_scope() as conn:
-        class_id = db.create_class(conn, name, subject)
+        class_id = db.create_class(conn, name, subject, teacher_id=teacher_id())
     flash(f"Class '{name}' is ready.", "success")
     return redirect(url_for("students_page", class_id=class_id))
 
@@ -214,6 +414,15 @@ def add_student():
     roll_no = (request.form.get("roll_no") or "").strip()
     class_id = parse_int(request.form.get("class_id"))
     photos = [f for f in request.files.getlist("student_photo") if f and f.filename]
+
+    # A student now belongs to a teacher *through* their class, so enrolling
+    # without one would create a student nobody can see.
+    if class_id is None:
+        flash("Choose a class before enrolling a student.", "error")
+        return redirect(url_for("students_page"))
+    with get_db() as conn:
+        if not auth.owns_class(conn, teacher_id(), class_id):
+            abort(404)
 
     if not name or not roll_no:
         flash("Name and roll number are both required.", "error")
@@ -301,8 +510,12 @@ def add_student():
 
     try:
         with db.session_scope() as conn:
+            # Roll numbers are unique per class, not globally, so this lookup
+            # must be scoped too. Without the class_id it would find another
+            # teacher's roll 12 and overwrite their student's face.
             existing = conn.execute(
-                "SELECT id FROM students WHERE roll_no = ?", (roll_no,)
+                "SELECT id FROM students WHERE roll_no = ? AND class_id IS ?",
+                (roll_no, class_id),
             ).fetchone()
             if existing:
                 student_id = existing["id"]
@@ -345,6 +558,8 @@ def add_student():
 @app.post("/students/<int:student_id>/delete")
 def remove_student(student_id: int):
     with db.session_scope() as conn:
+        if not auth.owns_student(conn, teacher_id(), student_id):
+            abort(404)
         student = db.get_student(conn, student_id)
         class_id = student["class_id"] if student else None
         if student and student["photo_path"]:
@@ -356,7 +571,11 @@ def remove_student(student_id: int):
 
 @app.get("/face/<int:student_id>")
 def student_face(student_id: int):
+    # An enrolment photo is biometric data. Serving it by sequential id with
+    # no ownership check would let any logged-in teacher walk the whole school.
     with get_db() as conn:
+        if not auth.owns_student(conn, teacher_id(), student_id):
+            abort(404)
         student = db.get_student(conn, student_id)
     if not student or not student["photo_path"]:
         abort(404)
@@ -437,10 +656,10 @@ def api_scan():
 
     with get_db() as conn:
         klass = db.get_class(conn, class_id)
-        if klass is None:
+        if klass is None or not auth.owns_class(conn, teacher_id(), class_id):
             return jsonify({"error": "That class no longer exists."}), 404
-        _, labels, matrix = db.known_faces(conn, class_id)
-        roster = db.list_students(conn, class_id)
+        _, labels, matrix = db.known_faces(conn, class_id, teacher_id=teacher_id())
+        roster = db.list_students(conn, class_id, teacher_id=teacher_id())
 
     if not len(matrix):
         return jsonify(
@@ -522,7 +741,9 @@ def api_confirm():
         }
 
     with db.session_scope() as conn:
-        if db.get_class(conn, class_id) is None:
+        if db.get_class(conn, class_id) is None or not auth.owns_class(
+            conn, teacher_id(), class_id
+        ):
             return jsonify({"error": "That class no longer exists."}), 404
         session_id = db.create_session(
             conn, class_id, on_date, period, taken_by, total_faces
@@ -543,6 +764,11 @@ def api_update_status():
     if None in (session_id, student_id) or status not in ("present", "absent", "late"):
         return jsonify({"error": "Invalid request."}), 400
     with db.session_scope() as conn:
+        tid = teacher_id()
+        if not auth.owns_session(conn, tid, session_id) or not auth.owns_student(
+            conn, tid, student_id
+        ):
+            return jsonify({"error": "That session no longer exists."}), 404
         db.set_status(conn, session_id, student_id, status)
     return jsonify({"ok": True, "student_id": student_id, "status": status})
 
@@ -550,6 +776,8 @@ def api_update_status():
 @app.post("/records/<int:session_id>/delete")
 def delete_session(session_id: int):
     with db.session_scope() as conn:
+        if not auth.owns_session(conn, teacher_id(), session_id):
+            abort(404)
         db.delete_session(conn, session_id)
     flash("Session deleted.", "success")
     return redirect(url_for("records"))
@@ -560,7 +788,7 @@ def delete_session(session_id: int):
 def api_students():
     class_id = parse_int(request.args.get("class_id"))
     with get_db() as conn:
-        rows = db.list_students(conn, class_id)
+        rows = db.list_students(conn, class_id, teacher_id=teacher_id())
     return jsonify(
         {
             "students": [
@@ -581,7 +809,9 @@ def api_today():
     class_id = parse_int(request.args.get("class_id"))
     today = date.today().isoformat()
     with get_db() as conn:
-        sessions = db.list_sessions(conn, class_id, start=today, end=today)
+        sessions = db.list_sessions(
+            conn, class_id, start=today, end=today, teacher_id=teacher_id()
+        )
         records = []
         for sess in sessions:
             for row in db.session_rows(conn, sess["id"]):
@@ -604,7 +834,7 @@ def api_reload_faces():
     """Re-encode every enrolled photo (use after replacing files in faces/)."""
     updated, failed = 0, []
     with db.session_scope() as conn:
-        for student in db.list_students(conn):
+        for student in db.list_students(conn, teacher_id=teacher_id()):
             if not student["photo_path"]:
                 continue
             path = FACES_DIR / student["photo_path"]
@@ -629,9 +859,12 @@ def download_excel():
     class_id = parse_int(request.args.get("class_id"))
     start = request.args.get("start") or None
     end = request.args.get("end") or None
+    tid = teacher_id()
     with get_db() as conn:
-        buffer = excel_report.workbook_bytes(conn, class_id, start, end)
-        filename = excel_report.suggested_filename(conn, class_id)
+        if class_id is not None and not auth.owns_class(conn, tid, class_id):
+            abort(404)
+        buffer = excel_report.workbook_bytes(conn, class_id, start, end, teacher_id=tid)
+        filename = excel_report.suggested_filename(conn, class_id, teacher_id=tid)
     return send_file(
         buffer,
         as_attachment=True,
