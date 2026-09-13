@@ -32,6 +32,8 @@ from typing import Iterable, Optional
 
 import numpy as np
 
+import auth
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("ATTENDANCE_DB", BASE_DIR / "instance" / "attendance.db"))
 
@@ -130,9 +132,17 @@ def session_scope(db_path: Optional[os.PathLike | str] = None):
         conn.close()
 
 
-def init_db(db_path: Optional[os.PathLike | str] = None) -> None:
+def init_db(db_path: Optional[os.PathLike | str] = None) -> list[str]:
+    """Create the schema, then bring an older database up to date.
+
+    auth.ensure_schema adds the teachers table and converts the two global
+    UNIQUE constraints (class name, roll number) into per-teacher and
+    per-class ones. It is a no-op once applied, so this is safe on every
+    start. Returns the migration steps performed, for the startup log.
+    """
     with session_scope(db_path) as conn:
         conn.executescript(SCHEMA)
+        return auth.ensure_schema(conn)
 
 
 # ------------------------------------------------------------ encoding blob
@@ -145,30 +155,49 @@ def blob_to_encoding(blob: bytes) -> np.ndarray:
 
 
 # ------------------------------------------------------------------ classes
-def create_class(conn, name: str, subject: str = "") -> int:
+def create_class(conn, name: str, subject: str = "", teacher_id: Optional[int] = None) -> int:
+    """Create (or return) a class belonging to one teacher.
+
+    Two teachers may both teach 'CSE 3A / DBMS'; the uniqueness is per
+    teacher, so the lookup that follows an ignored insert must be scoped the
+    same way or one teacher would silently be handed another's class.
+    """
     cur = conn.execute(
-        "INSERT OR IGNORE INTO classes (name, subject) VALUES (?, ?)",
-        (name.strip(), subject.strip()),
+        "INSERT OR IGNORE INTO classes (name, subject, teacher_id) VALUES (?, ?, ?)",
+        (name.strip(), subject.strip(), teacher_id),
     )
     if cur.lastrowid:
         return cur.lastrowid
     row = conn.execute(
-        "SELECT id FROM classes WHERE name = ? AND subject = ?",
-        (name.strip(), subject.strip()),
+        """SELECT id FROM classes
+            WHERE name = ? AND subject = ?
+              AND teacher_id IS ?""",
+        (name.strip(), subject.strip(), teacher_id),
     ).fetchone()
     return row["id"]
 
 
-def list_classes(conn) -> list[sqlite3.Row]:
+def list_classes(conn, teacher_id: Optional[int] = None) -> list[sqlite3.Row]:
+    """Classes for one teacher, or every class when teacher_id is None.
+
+    Passing None is for the CLI and the test suite. Web requests always pass
+    the logged-in teacher.
+    """
+    where, params = ["1 = 1"], []
+    if teacher_id is not None:
+        where.append("c.teacher_id = ?")
+        params.append(teacher_id)
     return conn.execute(
-        """
+        f"""
         SELECT c.*,
                (SELECT COUNT(*) FROM students s
                  WHERE s.class_id = c.id AND s.active = 1) AS student_count,
                (SELECT COUNT(*) FROM sessions x WHERE x.class_id = c.id) AS session_count
           FROM classes c
+         WHERE {' AND '.join(where)}
          ORDER BY c.name, c.subject
-        """
+        """,
+        params,
     ).fetchall()
 
 
@@ -288,12 +317,22 @@ def clear_student_encodings(conn, student_id: int) -> None:
     conn.execute("DELETE FROM student_encodings WHERE student_id = ?", (student_id,))
 
 
-def list_students(conn, class_id: Optional[int] = None, active_only: bool = True):
+def list_students(
+    conn,
+    class_id: Optional[int] = None,
+    active_only: bool = True,
+    teacher_id: Optional[int] = None,
+):
     where = ["1 = 1"]
     params: list = []
     if class_id is not None:
         where.append("s.class_id = ?")
         params.append(class_id)
+    if teacher_id is not None:
+        # Students reach a teacher through their class. A student with no
+        # class belongs to nobody and is therefore invisible here.
+        where.append("c.teacher_id = ?")
+        params.append(teacher_id)
     if active_only:
         where.append("s.active = 1")
     return conn.execute(
@@ -316,12 +355,16 @@ def get_student(conn, student_id: int) -> Optional[sqlite3.Row]:
     ).fetchone()
 
 
-def known_faces(conn, class_id: Optional[int] = None):
+def known_faces(conn, class_id: Optional[int] = None, teacher_id: Optional[int] = None):
     """Return (ids, labels, matrix) of every student that has an encoding.
 
     matrix is an (N, 128) float64 array ready for face_recognition.face_distance.
     """
-    rows = [r for r in list_students(conn, class_id) if r["encoding"] is not None]
+    rows = [
+        r
+        for r in list_students(conn, class_id, teacher_id=teacher_id)
+        if r["encoding"] is not None
+    ]
 
     # Extra reference photos, keyed by student. A student with three photos
     # contributes three rows to the matrix; they all carry the same label, so
@@ -382,11 +425,21 @@ def create_session(
     return cur.lastrowid
 
 
-def list_sessions(conn, class_id: Optional[int] = None, start=None, end=None, limit=None):
+def list_sessions(
+    conn,
+    class_id: Optional[int] = None,
+    start=None,
+    end=None,
+    limit=None,
+    teacher_id: Optional[int] = None,
+):
     where, params = ["1 = 1"], []
     if class_id is not None:
         where.append("x.class_id = ?")
         params.append(class_id)
+    if teacher_id is not None:
+        where.append("c.teacher_id = ?")
+        params.append(teacher_id)
     if start:
         where.append("x.date >= ?")
         params.append(start)
@@ -497,17 +550,34 @@ def session_rows(conn, session_id: int):
 
 
 # ------------------------------------------------------------------ reports
-def attendance_summary(conn, class_id: Optional[int] = None, start=None, end=None):
+def attendance_summary(
+    conn,
+    class_id: Optional[int] = None,
+    start=None,
+    end=None,
+    teacher_id: Optional[int] = None,
+):
     """Per-student totals and percentage over the selected sessions."""
     where, params = ["s.active = 1"], []
     if class_id is not None:
         where.append("s.class_id = ?")
         params.append(class_id)
+    if teacher_id is not None:
+        where.append("c.teacher_id = ?")
+        params.append(teacher_id)
 
     sess_where, sess_params = ["1 = 1"], []
     if class_id is not None:
         sess_where.append("x.class_id = ?")
         sess_params.append(class_id)
+    if teacher_id is not None:
+        # 'held' counts the sessions in the CTE, so this filter matters twice:
+        # without it another teacher's sessions would inflate the denominator
+        # and every percentage on the page would be wrong.
+        sess_where.append(
+            "x.class_id IN (SELECT id FROM classes WHERE teacher_id = ?)"
+        )
+        sess_params.append(teacher_id)
     if start:
         sess_where.append("x.date >= ?")
         sess_params.append(start)
@@ -542,11 +612,17 @@ def attendance_summary(conn, class_id: Optional[int] = None, start=None, end=Non
     return out
 
 
-def attendance_grid(conn, class_id: Optional[int] = None, start=None, end=None):
+def attendance_grid(
+    conn,
+    class_id: Optional[int] = None,
+    start=None,
+    end=None,
+    teacher_id: Optional[int] = None,
+):
     """(students, sessions, marks) where marks[(student_id, session_id)] = status."""
-    students = list_students(conn, class_id)
+    students = list_students(conn, class_id, teacher_id=teacher_id)
     sessions = sorted(
-        list_sessions(conn, class_id, start, end),
+        list_sessions(conn, class_id, start, end, teacher_id=teacher_id),
         key=lambda r: (r["date"], len(r["period"]), r["period"]),
     )
     if not sessions:
@@ -561,11 +637,20 @@ def attendance_grid(conn, class_id: Optional[int] = None, start=None, end=None):
     return students, sessions, marks
 
 
-def detailed_records(conn, class_id: Optional[int] = None, start=None, end=None):
+def detailed_records(
+    conn,
+    class_id: Optional[int] = None,
+    start=None,
+    end=None,
+    teacher_id: Optional[int] = None,
+):
     where, params = ["1 = 1"], []
     if class_id is not None:
         where.append("x.class_id = ?")
         params.append(class_id)
+    if teacher_id is not None:
+        where.append("c.teacher_id = ?")
+        params.append(teacher_id)
     if start:
         where.append("x.date >= ?")
         params.append(start)
@@ -585,18 +670,24 @@ def detailed_records(conn, class_id: Optional[int] = None, start=None, end=None)
     ).fetchall()
 
 
-def dashboard_stats(conn, class_id: Optional[int] = None) -> dict:
+def dashboard_stats(
+    conn, class_id: Optional[int] = None, teacher_id: Optional[int] = None
+) -> dict:
     today = _date.today().isoformat()
-    students = len(list_students(conn, class_id))
-    sess = list_sessions(conn, class_id, start=today, end=today)
+    students = len(list_students(conn, class_id, teacher_id=teacher_id))
+    sess = list_sessions(
+        conn, class_id, start=today, end=today, teacher_id=teacher_id
+    )
     present_today = sum(s["present_count"] for s in sess)
-    summary = attendance_summary(conn, class_id)
+    summary = attendance_summary(conn, class_id, teacher_id=teacher_id)
     avg = round(sum(s["percent"] for s in summary) / len(summary), 1) if summary else 0.0
     return {
         "students": students,
         "sessions_today": len(sess),
         "present_today": present_today,
-        "total_sessions": len(list_sessions(conn, class_id)),
+        "total_sessions": len(
+            list_sessions(conn, class_id, teacher_id=teacher_id)
+        ),
         "avg_percent": avg,
         "defaulters": sum(1 for s in summary if s["defaulter"]),
     }
