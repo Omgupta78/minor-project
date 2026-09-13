@@ -107,9 +107,9 @@ def _period_label(session) -> str:
 
 
 # ------------------------------------------------------------------ sheet 1
-def _summary_sheet(wb: Workbook, conn, class_id, start, end, scope: str) -> None:
+def _summary_sheet(wb: Workbook, conn, class_id, start, end, scope: str, teacher_id=None) -> None:
     ws = wb.create_sheet("Summary")
-    rows = db.attendance_summary(conn, class_id, start, end)
+    rows = db.attendance_summary(conn, class_id, start, end, teacher_id=teacher_id)
     headers = [
         "Roll No",
         "Student Name",
@@ -191,9 +191,11 @@ def _summary_sheet(wb: Workbook, conn, class_id, start, end, scope: str) -> None
 
 
 # ------------------------------------------------------------------ sheet 2
-def _grid_sheet(wb: Workbook, conn, class_id, start, end, scope: str) -> None:
+def _grid_sheet(wb: Workbook, conn, class_id, start, end, scope: str, teacher_id=None) -> None:
     ws = wb.create_sheet("Attendance Grid")
-    students, sessions, marks = db.attendance_grid(conn, class_id, start, end)
+    students, sessions, marks = db.attendance_grid(
+        conn, class_id, start, end, teacher_id=teacher_id
+    )
 
     headers = ["Roll No", "Student Name"] + [
         f"{s['date'][5:]}\n{_period_label(s)}" for s in sessions
@@ -266,9 +268,9 @@ def _grid_sheet(wb: Workbook, conn, class_id, start, end, scope: str) -> None:
 
 
 # ------------------------------------------------------------------ sheet 3
-def _detail_sheet(wb: Workbook, conn, class_id, start, end, scope: str) -> None:
+def _detail_sheet(wb: Workbook, conn, class_id, start, end, scope: str, teacher_id=None) -> None:
     ws = wb.create_sheet("Detailed Records")
-    rows = db.detailed_records(conn, class_id, start, end)
+    rows = db.detailed_records(conn, class_id, start, end, teacher_id=teacher_id)
     headers = [
         "Date",
         "Period",
@@ -324,9 +326,9 @@ def _detail_sheet(wb: Workbook, conn, class_id, start, end, scope: str) -> None:
 
 
 # ------------------------------------------------------------------ sheet 4
-def _session_sheet(wb: Workbook, conn, class_id, start, end, scope: str) -> None:
+def _session_sheet(wb: Workbook, conn, class_id, start, end, scope: str, teacher_id=None) -> None:
     ws = wb.create_sheet("Session Log")
-    sessions = db.list_sessions(conn, class_id, start, end)
+    sessions = db.list_sessions(conn, class_id, start, end, teacher_id=teacher_id)
     headers = [
         "Date",
         "Period",
@@ -375,8 +377,15 @@ def build_workbook(
     class_id: Optional[int] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
+    teacher_id: Optional[int] = None,
 ) -> Workbook:
-    """Build the complete attendance workbook."""
+    """Build the complete attendance workbook.
+
+    teacher_id scopes every sheet to one teacher. Leaving it None exports
+    everything, which is what the CLI and the tests want but never what a web
+    request wants: the 'All classes' download would otherwise hand one teacher
+    the whole server's attendance.
+    """
     klass = db.get_class(conn, class_id) if class_id else None
     parts = []
     if klass:
@@ -393,10 +402,10 @@ def build_workbook(
 
     wb = Workbook()
     wb.remove(wb.active)
-    _summary_sheet(wb, conn, class_id, start, end, scope)
-    _grid_sheet(wb, conn, class_id, start, end, scope)
-    _detail_sheet(wb, conn, class_id, start, end, scope)
-    _session_sheet(wb, conn, class_id, start, end, scope)
+    _summary_sheet(wb, conn, class_id, start, end, scope, teacher_id)
+    _grid_sheet(wb, conn, class_id, start, end, scope, teacher_id)
+    _detail_sheet(wb, conn, class_id, start, end, scope, teacher_id)
+    _session_sheet(wb, conn, class_id, start, end, scope, teacher_id)
 
     props = wb.properties
     props.title = "Attendance Report"
@@ -405,14 +414,18 @@ def build_workbook(
     return wb
 
 
-def workbook_bytes(conn, class_id=None, start=None, end=None) -> io.BytesIO:
+def workbook_bytes(
+    conn, class_id=None, start=None, end=None, teacher_id=None
+) -> io.BytesIO:
     buffer = io.BytesIO()
-    build_workbook(conn, class_id, start, end).save(buffer)
+    build_workbook(conn, class_id, start, end, teacher_id=teacher_id).save(buffer)
     buffer.seek(0)
     return buffer
 
 
-def suggested_filename(conn, class_id: Optional[int] = None) -> str:
+def suggested_filename(
+    conn, class_id: Optional[int] = None, teacher_id: Optional[int] = None
+) -> str:
     klass = db.get_class(conn, class_id) if class_id else None
     stem = "attendance"
     if klass:
