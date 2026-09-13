@@ -67,6 +67,25 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("HEIC fallback decoder for scans", "recognition.py", "def decode_with_pillow", True),
     ("upload form offers HEIC", "templates/index.html", ".heic", True),
     ("pillow-heif in requirements", "requirements.txt", "pillow-heif", True),
+    # --- teacher accounts and data isolation ---
+    ("teacher accounts module present", "auth.py", "def create_teacher", True),
+    ("passwords hashed, not stored", "auth.py", "pbkdf2_sha256", True),
+    ("login required on every page", "app.py", "def require_login", True),
+    ("public pages listed explicitly", "app.py", "PUBLIC_ENDPOINTS", True),
+    ("classes belong to a teacher", "db.py", "teacher_id", True),
+    ("queries are teacher-scoped", "db.py", "c.teacher_id = ?", True),
+    ("Excel export is teacher-scoped", "excel_report.py", "teacher_id", True),
+    ("login page present", "templates/login.html", "", True),
+    ("signup page present", "templates/signup.html", "", True),
+    ("logout control in the nav", "templates/base.html", "/logout", True),
+    ("isolation tests present", "authtest.py", "One teacher cannot reach another", True),
+    # --- hosting for other teachers ---
+    ("session cookie key configurable", "app.py", "SECRET_KEY", True),
+    ("health check endpoint", "app.py", "/healthz", True),
+    ("production server settings", "gunicorn.conf.py", "", True),
+    ("container image definition", "Dockerfile", "", True),
+    ("deployment guide", "DEPLOY.md", "", True),
+    ("production server in requirements", "requirements.txt", "gunicorn", True),
 ]
 
 
@@ -99,7 +118,8 @@ def main() -> int:
     print("  " + "=" * 52)
 
     if not failures:
-        print("  VERDICT: new build. Multi-photo attendance IS present.")
+        print("  VERDICT: new build. Multi-photo attendance, teacher accounts")
+        print("           and the deployment kit are ALL present.")
         print()
         print("  If the browser still shows a single-photo page, it is caching.")
         print("  Stop the server, then hard-reload:")

@@ -43,6 +43,11 @@ with db.session_scope() as conn:
     sess = db.get_session(conn, sid)
     rows = db.session_rows(conn, sid)
 
+    # The nav shows the logged-in teacher's name and a logout button, so the
+    # templates must be rendered with a teacher present as well as without.
+    teacher = {"id": 1, "name": "Prof. A. Sharma", "email": "a.sharma@school.edu",
+               "is_admin": 1}
+
     base = dict(
         active_page="",
         match_threshold=0.50,
@@ -51,6 +56,7 @@ with db.session_scope() as conn:
         classes=classes,
         class_id=cid,
         today="2026-09-09",
+        teacher=teacher,
     )
 
     cases = [
@@ -92,5 +98,37 @@ with db.session_scope() as conn:
     with open(RENDER_DIR / "records_empty.html", "w") as fh:
         fh.write(h)
     print(f"OK  records (empty)        {len(h):>6} bytes")
+
+    # The login and signup pages stand alone, and are the first thing every
+    # teacher in the world sees, so a Jinja error there locks everyone out.
+    class _Args:
+        @staticmethod
+        def get(key, default=None):
+            return {"next": "/records"}.get(key, default)
+
+    env.globals["request"] = type("_Req", (), {"args": _Args})()
+
+    for name, ctx in (
+        ("login.html", dict(email="a.sharma@school.edu")),
+        ("signup.html", dict(email="", name="", first_ever=True)),
+        ("signup_closed.html", dict(email="a@b.edu", name="A B", first_ever=False)),
+    ):
+        template = "signup.html" if name.startswith("signup") else name
+        h = env.get_template(template).render(**ctx)
+        with open(RENDER_DIR / name, "w") as fh:
+            fh.write(h)
+        # A login form that posts nowhere, or a page whose stylesheet did not
+        # resolve, is broken in a way that still "renders".
+        assert 'name="password"' in h, f"{name}: no password field"
+        assert "static/app.css" in h, f"{name}: stylesheet not linked"
+        print(f"OK  {name:<22} {len(h):>6} bytes")
+
+    # Nobody logged in: the nav must not offer a logout button or a name.
+    h = env.get_template("index.html").render(
+        **dict(base, active_page="dashboard", students=students, stats=stats,
+               recent=sessions[:5], teacher=None))
+    assert "/logout" not in h, "logged-out nav still shows a logout control"
+    assert teacher["name"] not in h, "logged-out nav still shows a teacher name"
+    print(f"OK  index.html (no login)  {len(h):>6} bytes")
 
 print("\nALL TEMPLATES RENDER")
