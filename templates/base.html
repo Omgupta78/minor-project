@@ -57,6 +57,20 @@
       <span class="material-symbols-outlined text-[18px]">download</span>
       <span class="hidden sm:inline">Excel</span>
     </a>
+
+    <!-- Who is logged in. `teacher` comes from inject_globals() and is None
+         when nobody is, which only happens on the public pages. -->
+    {% if teacher %}
+    <div class="flex items-center gap-2 pl-1 md:pl-2 md:border-l md:border-bdr">
+      <span class="hidden md:inline text-sm text-txt-m max-w-[140px] truncate" title="{{ teacher.email }}">{{ teacher.name }}</span>
+      <form method="post" action="/logout" class="flex">
+        <button type="submit" title="Log out"
+                class="text-txt-m hover:text-danger flex items-center p-1.5 rounded-lg hover:bg-surface-el transition-colors">
+          <span class="material-symbols-outlined text-[20px]">logout</span>
+        </button>
+      </form>
+    </div>
+    {% endif %}
   </div>
 </nav>
 
@@ -66,6 +80,15 @@
   <a href="/records" class="flex-1 text-center text-xs py-2.5 {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'records' else 'text-txt-m' }}">Records</a>
   <a href="/students_page" class="flex-1 text-center text-xs py-2.5 {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'students' else 'text-txt-m' }}">Students</a>
 </div>
+
+{% if teacher %}
+<div class="md:hidden bg-surface-el border-b border-bdr px-4 py-1.5 flex justify-between items-center">
+  <span class="text-[11px] text-txt-m truncate">Signed in as {{ teacher.name }}</span>
+  <form method="post" action="/logout">
+    <button type="submit" class="text-[11px] text-primary font-semibold">Log out</button>
+  </form>
+</div>
+{% endif %}
 
 <main class="flex-1 bg-bg p-4 md:p-6">
   {% with messages = get_flashed_messages(with_categories=true) %}

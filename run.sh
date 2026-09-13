@@ -63,4 +63,21 @@ fi
 echo "[3/3] Starting the server..."
 export OPEN_BROWSER="${OPEN_BROWSER:-1}"
 export PORT
+
+# This launcher serves plain http on 127.0.0.1, and a browser refuses to keep
+# a Secure cookie on http, so the login would silently never stick. Only the
+# local launcher relaxes this: a real deployment keeps COOKIE_SECURE=1.
+export COOKIE_SECURE="${COOKIE_SECURE:-0}"
+
+# Keeps everyone logged in across restarts of this local copy. A hosted
+# deployment should set SECRET_KEY itself instead of relying on this file.
+if [ -z "${SECRET_KEY:-}" ]; then
+  if [ ! -f instance/secret_key ]; then
+    mkdir -p instance
+    python -c "import secrets; print(secrets.token_hex(32))" > instance/secret_key
+  fi
+  SECRET_KEY="$(cat instance/secret_key)"
+  export SECRET_KEY
+fi
+
 exec python app.py

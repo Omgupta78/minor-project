@@ -59,6 +59,17 @@ if %errorlevel%==0 (
 
 echo [3/3] Starting the server...
 set OPEN_BROWSER=1
+
+REM This launcher serves plain http on 127.0.0.1, and a browser refuses to
+REM keep a Secure cookie on http, so the login would silently never stick.
+REM Only the local launcher relaxes this: a real deployment keeps it at 1.
+set COOKIE_SECURE=0
+
+REM Keeps everyone logged in across restarts of this local copy.
+if not exist "instance" mkdir instance
+if not exist "instance\secret_key" python -c "import secrets; print(secrets.token_hex(32))" > instance\secret_key
+for /f "usebackq delims=" %%K in ("instance\secret_key") do set SECRET_KEY=%%K
+
 python app.py
 
 echo.
