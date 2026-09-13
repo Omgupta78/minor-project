@@ -5,6 +5,11 @@
 Flask>=3.0.0
 Werkzeug>=3.0.0
 
+# --- production server ---
+# Flask's built-in server is single-threaded and not meant for real use.
+# Only needed when hosting for other teachers; local runs work without it.
+gunicorn>=21.2.0
+
 # --- face recognition ---
 # dlib must build before face_recognition. On Windows install
 # "Visual Studio Build Tools -> Desktop development with C++" first,

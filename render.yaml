@@ -1,0 +1,61 @@
+# Render.com blueprint for FaceID Attendance.
+#
+# Render is used here as the example because its free tier can build a Docker
+# image and attach a persistent disk, which this app needs for two reasons:
+#   * attendance.db is a SQLite file
+#   * faces/ holds the enrolment photographs
+# Without the disk, every deploy would erase the whole term's attendance.
+#
+# Deploy:  push this repo to GitHub, then in Render choose
+#          New -> Blueprint -> pick the repo. Set SECRET_KEY when asked.
+#
+# The same three ideas (Docker image, persistent volume, SECRET_KEY) apply to
+# Railway, Fly.io, a college VM, or any VPS. See DEPLOY.md.
+
+services:
+  - type: web
+    name: faceid-attendance
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter          # 'free' cannot attach a disk; data would vanish
+    region: singapore      # pick the region closest to the school
+    healthCheckPath: /healthz
+    autoDeploy: false      # a semester of attendance should not redeploy itself
+
+    disk:
+      name: attendance-data
+      mountPath: /data     # matches ATTENDANCE_DB and FACES_DIR below
+      sizeGB: 5            # ~5 KB per face encoding, photos dominate
+
+    envVars:
+      # Generated once by Render and kept across deploys, so teachers are not
+      # logged out whenever the service restarts.
+      - key: SECRET_KEY
+        generateValue: true
+
+      # Close registration after your staff have signed up. Start at 1 so the
+      # first teacher can create the admin account, then set this to 0.
+      - key: ALLOW_SIGNUP
+        value: "1"
+
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: ATTENDANCE_DB
+        value: /data/attendance.db
+      - key: FACES_DIR
+        value: /data/faces
+      - key: PORT
+        value: "8000"
+      - key: HOST
+        value: 0.0.0.0
+      - key: OPEN_BROWSER
+        value: "0"
+      - key: FLASK_DEBUG
+        value: "0"
+
+      # Recognition takes seconds per photo; the default worker timeout is
+      # too short for a 40-face class picture.
+      - key: GUNICORN_TIMEOUT
+        value: "300"
+      - key: WEB_CONCURRENCY
+        value: "2"

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>FaceID Attendance | Create account</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='icons.css') }}"/>
+<script src="{{ url_for('static', filename='icons.js') }}" defer></script>
+<style>
+  body { background:#F8FAFB; color:#0F172A; }
+  .fade-in { animation:fadeIn .3s ease; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+</style>
+</head>
+<body class="font-sans antialiased flex flex-col min-h-screen">
+
+<main class="flex-1 flex items-center justify-center p-4">
+  <div class="w-full max-w-md">
+
+    <div class="flex items-center justify-center gap-2 mb-6">
+      <span class="material-symbols-outlined text-primary text-[30px]" style="font-variation-settings:'FILL' 1">face</span>
+      <span class="text-xl font-bold text-txt">FaceID Attendance</span>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <div class="flex flex-col gap-2 mb-4">
+        {% for category, message in messages %}
+        <div class="flex items-start gap-2 px-4 py-3 rounded-lg border text-sm fade-in
+          {{ 'bg-danger-light border-danger/30 text-danger' if category == 'error' else 'bg-success-light border-success/30 text-green-800' }}">
+          <span class="material-symbols-outlined text-[18px] flex-shrink-0">{{ 'error' if category == 'error' else 'check_circle' }}</span>
+          <span>{{ message }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% endwith %}
+
+    {% if first_ever %}
+    <div class="bg-primary-light border border-primary/30 text-txt rounded-lg px-4 py-3 text-sm mb-4 flex items-start gap-2">
+      <span class="material-symbols-outlined text-[18px] text-primary flex-shrink-0">shield_person</span>
+      <span>This server has no accounts yet. The first account becomes the
+        administrator and adopts any classes that already exist in the database.</span>
+    </div>
+    {% endif %}
+
+    <div class="bg-white border border-bdr rounded-xl shadow-sm p-6">
+      <h1 class="text-lg font-bold text-txt mb-1">Create your teacher account</h1>
+      <p class="text-sm text-txt-m mb-5">One account per teacher. Nobody else can see your classes.</p>
+
+      <form method="post" action="{{ url_for('signup') }}" class="flex flex-col gap-4">
+        <div>
+          <label for="in-name" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1.5">Your name</label>
+          <input id="in-name" name="name" type="text" required autofocus autocomplete="name"
+                 value="{{ name }}" placeholder="Prof. A. Sharma" maxlength="80"
+                 class="w-full border border-bdr rounded-lg px-3 py-2 text-sm bg-surface-el focus:bg-white focus:border-primary"/>
+        </div>
+
+        <div>
+          <label for="in-email" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1.5">Email</label>
+          <input id="in-email" name="email" type="email" required autocomplete="username"
+                 value="{{ email }}" placeholder="you@school.edu"
+                 class="w-full border border-bdr rounded-lg px-3 py-2 text-sm bg-surface-el focus:bg-white focus:border-primary"/>
+          <p class="text-[11px] text-txt-f mt-1">Used only as your login name. No mail is sent.</p>
+        </div>
+
+        <div>
+          <label for="in-password" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1.5">Password</label>
+          <input id="in-password" name="password" type="password" required autocomplete="new-password"
+                 minlength="8" placeholder="At least 8 characters"
+                 class="w-full border border-bdr rounded-lg px-3 py-2 text-sm bg-surface-el focus:bg-white focus:border-primary"/>
+          <p class="text-[11px] text-txt-f mt-1">Stored as a PBKDF2-SHA256 hash, never as text.</p>
+        </div>
+
+        <button type="submit"
+                class="bg-primary hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm">
+          <span class="material-symbols-outlined text-[18px]">person_add</span>
+          Create account
+        </button>
+      </form>
+
+      <p class="text-sm text-txt-m mt-5 pt-4 border-t border-bdr">
+        Already registered?
+        <a href="{{ url_for('login') }}" class="text-primary font-semibold hover:underline">Log in</a>
+      </p>
+    </div>
+
+    <p class="text-center text-[11px] text-txt-f mt-5 leading-relaxed">
+      Admins: set ALLOW_SIGNUP=0 once your staff have registered,<br/>
+      so a public address does not collect strangers.
+    </p>
+  </div>
+</main>
+
+</body>
+</html>
