@@ -67,7 +67,7 @@ git clone https://github.com/Omgupta78/minor-project.git
 cd minor-project
 
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
 
 pip install -r requirements.txt
 ```
@@ -83,7 +83,13 @@ python -c "import db; db.init_db()"
 python app.py
 ```
 
-Open <http://127.0.0.1:5000>.
+Open <http://127.0.0.1:5000>. The first visit asks you to create an account:
+the first account on a server becomes the administrator. After that, every
+page requires a login, and each teacher sees only their own classes.
+
+> On a plain-http address (including `127.0.0.1`) set `COOKIE_SECURE=0`,
+> otherwise the browser drops the login cookie and the login appears to do
+> nothing. `run.sh` and `run.bat` already do this for local use.
 
 ### Migrating an existing `faces/` folder
 
@@ -97,6 +103,7 @@ python migrate_to_db.py --class "CSE 3rd Year A" --subject DBMS
 
 ```bash
 python selftest.py      # data layer + Excel builder, no camera needed
+python authtest.py      # accounts, password hashing, teacher isolation
 python rendertest.py    # renders every template against real data
 python multitest.py     # multi-photo merge rules
 python heictest.py      # iPhone HEIC decoding + EXIF rotation
@@ -124,7 +131,10 @@ All optional, set as environment variables:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SECRET_KEY` | dev value | Flask session signing key - **set this in production** |
+| `SECRET_KEY` | random per start | Signs the login cookie - **set this in production**, or every restart logs everyone out |
+| `ALLOW_SIGNUP` | `1` | Set to `0` once your staff have registered, to stop new accounts. The first account is always allowed |
+| `COOKIE_SECURE` | `1` | Send the login cookie only over HTTPS. Use `0` for local http testing |
+| `PASSWORD_ROUNDS` | `240000` | PBKDF2-SHA256 iterations for password hashing |
 | `ATTENDANCE_DB` | `instance/attendance.db` | SQLite database path |
 | `FACES_DIR` | `faces` | Where enrolment photos are stored |
 | `MATCH_DISTANCE` | `0.50` | Distance at or below which a face auto-matches (lower = stricter) |
@@ -150,13 +160,15 @@ in the same session.
 
 ```
 app.py               Flask routes only - no recognition or SQL logic
+auth.py              Accounts, password hashing, ownership checks, migration
 db.py                SQLite schema and every query, one place
 recognition.py       Face detection, encoding, matching, duplicate resolution
 excel_report.py      The 4-sheet openpyxl workbook builder
 migrate_to_db.py     One-time importer for a legacy faces/ folder
 build_css.py         Regenerates static/app.css from the templates
-doctor.py            Reports whether this copy is the multi-photo build
+doctor.py            Reports whether this copy is the current build
 selftest.py          Smoke test for the data + report layers
+authtest.py          Accounts, hashing and teacher-isolation checks
 rendertest.py        Renders every template against real data
 multitest.py         Multi-photo merge checks
 heictest.py          HEIC/HEIF decoding and EXIF rotation checks
@@ -166,6 +178,13 @@ static/app.css       Generated stylesheet
 static/icons.js      Inline SVG icon set
 faces/               Enrolment photos (git-ignored)
 instance/            SQLite database (git-ignored)
+
+Dockerfile           Production container image (compiles dlib)
+gunicorn.conf.py     Production server settings (long timeouts for scans)
+render.yaml          One-click blueprint for Render.com, with a data disk
+Procfile             Process definition for Heroku-style platforms
+.env.example         Every environment variable, documented
+DEPLOY.md            How to host it, and the privacy rules that come with it
 ```
 
 ---
@@ -173,8 +192,10 @@ instance/            SQLite database (git-ignored)
 ## Database schema
 
 ```
-classes     id, name, subject                        UNIQUE(name, subject)
-students    id, roll_no, name, class_id, encoding    UNIQUE(roll_no)
+teachers    id, email, name, password_hash,          UNIQUE(email)
+            is_admin, active, last_login
+classes     id, teacher_id, name, subject            UNIQUE(teacher_id, name, subject)
+students    id, roll_no, name, class_id, encoding    UNIQUE(class_id, roll_no)
 sessions    id, class_id, date, period, taken_by     UNIQUE(class_id, date, period)
 attendance  id, session_id, student_id, status,      UNIQUE(session_id, student_id)
             confidence, method
@@ -182,6 +203,17 @@ attendance  id, session_id, student_id, status,      UNIQUE(session_id, student_
 
 The two `UNIQUE` constraints on `sessions` and `attendance` are what make re-running
 a scan idempotent instead of duplicating rows.
+
+`classes.teacher_id` is the root of all data isolation: every query that returns
+classes, students, sessions, attendance or Excel rows joins back to it. Roll
+numbers are unique **per class**, not globally, so two teachers can both have a
+roll number 1.
+
+Upgrading from a version before accounts existed? `db.init_db()` rebuilds those
+two tables at startup and prints what it changed. Classes that existed before
+the upgrade have no owner, and the first account created afterwards adopts them,
+so sign up as the teacher who owns that data first. Back up `attendance.db`
+beforehand.
 
 ---
 
@@ -197,15 +229,23 @@ Be honest about these in your report - they earn marks rather than losing them.
   distant faces all reduce detection. This is why the teacher confirms every session.
 - **Demographic bias.** dlib's model has documented uneven accuracy across skin tones
   and ages. The teacher-review step is the mitigation.
-- **No authentication yet.** Anyone who can reach the URL can take attendance.
-  Keep it on `127.0.0.1` until login is added.
+- **Accounts, but no email.** Every page needs a login and teachers cannot see
+  each other's data, but there is no password reset by email: an admin restores
+  access directly in the database.
+- **No audit log.** Manual overrides are stored, but not who made them.
+- **Hosting student face data has legal weight.** A server that holds face
+  templates of children is regulated under GDPR Article 9, Illinois BIPA and
+  India's DPDP Act, among others. See DEPLOY.md before putting this online:
+  one instance per school is the model that a school can actually adopt.
 
 ---
 
 ## Roadmap
 
-- [ ] Teacher login (Flask-Login) and per-teacher class ownership
+- [x] Teacher accounts and per-teacher class ownership
+- [x] Deployment kit (Docker, gunicorn, Render blueprint)
 - [ ] Liveness / anti-spoofing check
+- [ ] Password reset by email, and an audit log of manual overrides
 - [ ] Attendance trend charts on the dashboard
 - [ ] PDF export alongside Excel
 - [ ] Accuracy evaluation table (precision/recall on a labelled test set) for the report
@@ -346,7 +386,7 @@ dlib; later runs start in seconds.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
 pip install -r requirements.txt
 python app.py
 ```
@@ -382,9 +422,10 @@ PORT=8000 python app.py          # http://127.0.0.1:8000
 **Demoing from a phone.** `HOST=0.0.0.0 python app.py` makes the app reachable
 at your laptop's LAN IP (`ipconfig` / `ifconfig`), for example
 `http://192.168.1.7:5000`, so a phone on the same wifi can take the photos.
-There is no login yet, so anyone on that network can open it - use it on a
-trusted network, and never together with `FLASK_DEBUG=1`, which would expose a
-remote code execution console.
+Every page needs a login, so a stranger on that network sees the login screen
+rather than your class lists - but use it on a trusted network anyway, and
+never together with `FLASK_DEBUG=1`, which would expose a remote code
+execution console.
 
 ## Recognition accuracy
 
@@ -589,11 +630,67 @@ defensible sentence for the report.
 ```
 python smalltest.py     # 56 checks over far faces, false matches, rescue pass
 python qualitytest.py   # 60 checks over the accuracy work
+python authtest.py      # 77 checks over accounts, hashing and isolation
 python selftest.py      # core logic
 python multitest.py     # multi-photo sessions
 python heictest.py      # iPhone HEIC decoding
-python doctor.py        # 38 checks: is this folder the current build?
+python rendertest.py    # every template against real data
+python doctor.py        # 54 checks: is this folder the current build?
 ```
 
 All of these stub out `face_recognition`, so they run on a machine without
 dlib, OpenCV or Flask installed.
+
+---
+
+## Teacher accounts
+
+One account per teacher. Nothing is shared between them.
+
+- The **first account** created on a server becomes the administrator, and
+  adopts any classes that already existed in the database.
+- Passwords are stored as `pbkdf2_sha256` hashes with a per-user salt and
+  240,000 iterations. The plain password is never written anywhere, and the
+  hash is silently upgraded on the next login if you raise `PASSWORD_ROUNDS`.
+- A failed login says only "that email and password do not match", so the form
+  cannot be used to discover which email addresses have accounts.
+- Teacher A editing the class number in the address bar gets a 404, not
+  teacher B's class. Classes, students, sessions, attendance, enrolment
+  photographs (`/face/<id>`), the JSON API and the Excel export are all
+  filtered by owner. `authtest.py` asserts each of those paths.
+- Set `ALLOW_SIGNUP=0` after your staff have registered so a public address
+  stops collecting strangers.
+- Any teacher can change their own password from the app; there is no reset
+  by email because the app sends no mail at all.
+
+---
+
+## Hosting it for other teachers
+
+`DEPLOY.md` is the full guide. The short version:
+
+| Where | How |
+| --- | --- |
+| One teacher's laptop | `run.bat` or `run.sh` - nothing to host, nothing to secure |
+| Any server, container | `docker build -t faceid-attendance .` then run with a volume at `/data` |
+| Render.com | `render.yaml` blueprint, including the persistent disk |
+| College VM | `gunicorn --config gunicorn.conf.py app:app` behind nginx or Caddy |
+
+Three settings decide whether a deployment survives contact with reality:
+
+1. `SECRET_KEY` set to a fixed random value, or every restart logs all
+   teachers out.
+2. `ATTENDANCE_DB` and `FACES_DIR` on persistent storage, or every redeploy
+   erases the term's attendance and every enrolled face.
+3. `COOKIE_SECURE=1` with real HTTPS in front, and `client_max_body_size 64M`
+   plus a 300-second proxy timeout, because a 40-face class photo takes
+   seconds to process and megabytes to upload.
+
+`GET /healthz` is the liveness probe. It needs no login and returns no data.
+
+**On running one global server for the whole world:** the code supports it, the
+law is the hard part. Face templates of school children are special-category
+data under GDPR Article 9, need written consent under Illinois BIPA, and need
+verifiable parental consent under India's DPDP Act. Whoever runs that server
+is accountable for all of it. One instance per school keeps each school in
+control of its own students' data, and is the model to ship.
