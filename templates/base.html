@@ -2,140 +2,47 @@
 <html class="light" lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<meta name="theme-color" content="#f5f8fd"/>
 <title>FaceID Attendance | {% block title %}Dashboard{% endblock %}</title>
 <meta name="description" content="Face recognition classroom attendance system"/>
-<!-- Everything below is served from this machine. The app is fully usable
-     with no internet connection: no CDN, no webfont host, no build step.
-     Regenerate app.css with `python3 build_css.py` after editing templates. -->
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"/>
 <link rel="stylesheet" href="{{ url_for('static', filename='icons.css') }}"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}"/>
 <script src="{{ url_for('static', filename='icons.js') }}" defer></script>
 <style>
-  body { background:#F8FAFB; color:#0F172A; }
-  .blink { animation:blink 1s step-end infinite; }
-  @keyframes blink { 50%{opacity:0} }
-  .fade-in { animation:fadeIn .3s ease; }
-  @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
-  .spinner { width:18px;height:18px;border:2px solid #E0E7EF;border-top-color:#1565C0;border-radius:50%;animation:spin .6s linear infinite; }
-  @keyframes spin { to{transform:rotate(360deg)} }
-  ::-webkit-scrollbar { width:5px;height:5px; }
-  ::-webkit-scrollbar-track { background:transparent; }
-  ::-webkit-scrollbar-thumb { background:#E0E7EF; border-radius:3px; }
-  #camera-modal, #add-student-modal, #add-class-modal { display:none; }
-  #preview-canvas { max-width:100%;max-height:100%;object-fit:contain;display:block; }
-  /* Optional niceties: if the IBM Plex webfont files were never added to
-     static/fonts, the stack in app.css falls back to the system UI font. */
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
-  }
+body{background:#f5f8fd;color:#10204a}.blink{animation:blink 1s step-end infinite}@keyframes blink{50%{opacity:0}}.fade-in{animation:fadeIn .3s ease}@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}.spinner{width:18px;height:18px;border:2px solid #dbe7fb;border-top-color:#2463eb;border-radius:50%;animation:spin .6s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#dce3ef;border-radius:3px}#camera-modal,#add-student-modal,#add-class-modal{display:none}#preview-canvas{max-width:100%;max-height:100%;object-fit:contain;display:block}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style>
 {% block extra_head %}{% endblock %}
 </head>
 <body class="font-sans antialiased flex flex-col min-h-screen">
-
-<!-- ═══════════════ TOP NAV ═══════════════ -->
-<nav class="bg-white sticky top-0 z-50 border-b border-bdr shadow-sm flex justify-between items-center px-4 md:px-6 h-14 w-full flex-shrink-0">
-  <a href="/" class="flex items-center gap-2">
-    <span class="material-symbols-outlined text-primary text-[26px]" style="font-variation-settings:'FILL' 1">face</span>
-    <span class="text-base md:text-lg font-bold text-txt">FaceID Attendance</span>
-  </a>
-
-  <div class="hidden md:flex gap-6 h-full items-end">
-    <a href="/" class="text-sm pb-3 transition-colors {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'dashboard' else 'text-txt-m hover:text-primary' }}">Take Attendance</a>
-    <a href="/records" class="text-sm pb-3 transition-colors {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'records' else 'text-txt-m hover:text-primary' }}">Records</a>
+<nav class="app-topbar bg-white sticky top-0 z-50 flex justify-between items-center px-4 md:px-6 h-14 w-full flex-shrink-0">
+  <a href="/" class="desktop-nav flex items-center gap-2"><span class="app-brand-mark"><span class="material-symbols-outlined text-[22px]" style="font-variation-settings:'FILL' 1">face</span></span><span class="app-brand-copy text-base md:text-lg font-bold text-txt">FaceID Attendance</span></a>
+  <div class="mobile-page-title"><h1>{% block mobile_title %}{{ self.title() }}{% endblock %}</h1><p>{% block mobile_subtitle %}AI-assisted classroom attendance{% endblock %}</p></div>
+  <div class="desktop-nav hidden md:flex gap-6 h-full items-end">
+    <a href="/" class="text-sm pb-3 transition-colors {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'dashboard' else 'text-txt-m hover:text-primary' }}">Attendance</a>
     <a href="/students_page" class="text-sm pb-3 transition-colors {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'students' else 'text-txt-m hover:text-primary' }}">Students</a>
+    <a href="/records" class="text-sm pb-3 transition-colors {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'records' else 'text-txt-m hover:text-primary' }}">Records</a>
   </div>
-
-  <div class="flex items-center gap-3">
-    <div class="hidden sm:flex font-mono text-xs text-txt-m bg-surface-el border border-bdr px-2.5 py-1 rounded items-center gap-1.5">
-      <span class="material-symbols-outlined text-[14px]">schedule</span>
-      <span id="live-clock">--:--:--</span>
-    </div>
-    <a href="/download-excel{% if class_id %}?class_id={{ class_id }}{% endif %}"
-       class="bg-success hover:bg-green-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm">
-      <span class="material-symbols-outlined text-[18px]">download</span>
-      <span class="hidden sm:inline">Excel</span>
-    </a>
-
-    <!-- Who is logged in. `teacher` comes from inject_globals() and is None
-         when nobody is, which only happens on the public pages. -->
-    {% if teacher %}
-    <div class="flex items-center gap-2 pl-1 md:pl-2 md:border-l md:border-bdr">
-      <span class="hidden md:inline text-sm text-txt-m max-w-[140px] truncate" title="{{ teacher.email }}">{{ teacher.name }}</span>
-      <form method="post" action="/logout" class="flex">
-        <button type="submit" title="Log out"
-                class="text-txt-m hover:text-danger flex items-center p-1.5 rounded-lg hover:bg-surface-el transition-colors">
-          <span class="material-symbols-outlined text-[20px]">logout</span>
-        </button>
-      </form>
-    </div>
-    {% endif %}
+  <div class="app-topbar-actions flex items-center gap-3">
+    <div class="clock-pill hidden sm:flex font-mono text-xs text-txt-m bg-surface-el border border-bdr px-2.5 py-1 rounded items-center gap-1.5"><span class="material-symbols-outlined text-[14px]">schedule</span><span id="live-clock">--:--:--</span></div>
+    <a href="/download-excel{% if class_id %}?class_id={{ class_id }}{% endif %}" class="bg-success hover:bg-green-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"><span class="material-symbols-outlined text-[18px]">download</span><span class="hidden sm:inline">Excel</span></a>
+    {% if teacher %}<div class="flex items-center gap-2"><span class="app-user-name hidden md:inline text-sm text-txt-m max-w-[140px] truncate" title="{{ teacher.email }}">{{ teacher.name }}</span><button type="button" class="app-avatar mobile-account-menu hidden" onclick="document.getElementById('mobile-account-sheet').style.display='flex'" aria-label="Open account menu"><span class="material-symbols-outlined text-[20px]">face</span></button><form method="post" action="/logout" class="desktop-logout flex"><button type="submit" title="Log out" class="text-txt-m hover:text-danger flex items-center p-1.5 rounded-lg hover:bg-surface-el transition-colors"><span class="material-symbols-outlined text-[20px]">logout</span></button></form></div>{% endif %}
   </div>
 </nav>
-
-<!-- ═══════════════ MOBILE NAV ═══════════════ -->
-<div class="md:hidden flex border-b border-bdr bg-white sticky top-14 z-40">
-  <a href="/" class="flex-1 text-center text-xs py-2.5 {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'dashboard' else 'text-txt-m' }}">Attendance</a>
-  <a href="/records" class="flex-1 text-center text-xs py-2.5 {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'records' else 'text-txt-m' }}">Records</a>
-  <a href="/students_page" class="flex-1 text-center text-xs py-2.5 {{ 'text-primary font-semibold border-b-2 border-primary' if active_page == 'students' else 'text-txt-m' }}">Students</a>
-</div>
-
-{% if teacher %}
-<div class="md:hidden bg-surface-el border-b border-bdr px-4 py-1.5 flex justify-between items-center">
-  <span class="text-[11px] text-txt-m truncate">Signed in as {{ teacher.name }}</span>
-  <form method="post" action="/logout">
-    <button type="submit" class="text-[11px] text-primary font-semibold">Log out</button>
-  </form>
-</div>
-{% endif %}
-
-<main class="flex-1 bg-bg p-4 md:p-6">
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-    <div class="max-w-6xl mx-auto mb-4 flex flex-col gap-2">
-      {% for category, message in messages %}
-      <div class="flex items-start gap-2 px-4 py-3 rounded-lg border text-sm fade-in
-        {{ 'bg-danger-light border-danger/30 text-danger' if category == 'error' else 'bg-success-light border-success/30 text-green-800' }}">
-        <span class="material-symbols-outlined text-[18px] flex-shrink-0">{{ 'error' if category == 'error' else 'check_circle' }}</span>
-        <span>{{ message }}</span>
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-  {% endwith %}
-
-  {% block content %}{% endblock %}
+<main class="app-main flex-1 bg-bg p-4 md:p-6">
+{% with messages=get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-stack max-w-6xl mx-auto mb-4 flex flex-col gap-2">{% for category,message in messages %}<div class="flex items-start gap-2 px-4 py-3 rounded-lg border text-sm fade-in {{ 'bg-danger-light border-danger/30 text-danger' if category == 'error' else 'bg-success-light border-success/30 text-green-800' }}"><span class="material-symbols-outlined text-[18px] flex-shrink-0">{{ 'error' if category == 'error' else 'check_circle' }}</span><span>{{ message }}</span></div>{% endfor %}</div>{% endif %}{% endwith %}
+{% block content %}{% endblock %}
 </main>
-
+<nav class="mobile-bottom-nav" aria-label="Primary navigation">
+  <a href="/" class="{{ 'is-active' if active_page == 'dashboard' }}"><span class="nav-icon-wrap"><span class="material-symbols-outlined">camera_alt</span></span><span>Attendance</span></a>
+  <a href="/students_page" class="{{ 'is-active' if active_page == 'students' }}"><span class="nav-icon-wrap"><span class="material-symbols-outlined">group_add</span></span><span>Students</span></a>
+  <a href="/records" class="{{ 'is-active' if active_page == 'records' }}"><span class="nav-icon-wrap"><span class="material-symbols-outlined">event_note</span></span><span>Records</span></a>
+  <button type="button" onclick="document.getElementById('mobile-account-sheet').style.display='flex'" aria-label="Open profile"><span class="nav-icon-wrap"><span class="material-symbols-outlined text-[20px]">face</span></span><span>Profile</span></button>
+</nav>
+{% if teacher %}<div id="mobile-account-sheet" class="fixed inset-0 bg-black/40 z-[200] items-end justify-center backdrop-blur-sm" style="display:none" onclick="if(event.target===this)this.style.display='none'"><div class="bg-white w-full max-w-md rounded-t-3xl p-5 shadow-2xl"><div class="w-10 h-1 rounded-full bg-bdr mx-auto mb-5"></div><div class="flex items-center gap-3 pb-4 border-b border-bdr"><span class="app-avatar w-12 h-12"><span class="material-symbols-outlined">face</span></span><div class="min-w-0"><div class="font-bold text-txt truncate">{{ teacher.name }}</div><div class="text-xs text-txt-m truncate">{{ teacher.email }}</div></div></div><a href="/students_page" class="flex items-center gap-3 py-4 border-b border-bdr"><span class="material-symbols-outlined text-primary">group_add</span><span class="text-sm font-semibold">Manage students</span><span class="material-symbols-outlined text-txt-f ml-auto">chevron_right</span></a><a href="/records" class="flex items-center gap-3 py-4 border-b border-bdr"><span class="material-symbols-outlined text-primary">download</span><span class="text-sm font-semibold">Reports and exports</span><span class="material-symbols-outlined text-txt-f ml-auto">chevron_right</span></a><form method="post" action="/logout" class="pt-4"><button type="submit" class="w-full bg-danger-light text-danger font-semibold py-3 rounded-xl">Log out</button></form></div></div>{% endif %}
 {% block modals %}{% endblock %}
-
-<footer class="bg-white border-t border-bdr px-5 py-2.5 flex flex-wrap justify-between items-center gap-2">
-  <div class="font-mono text-[11px] text-txt-m flex items-center gap-1.5">
-    <span class="text-success">●</span>
-    <span id="console-text">ready</span>
-  </div>
-  <div class="flex items-center gap-2 font-mono text-[9px] text-txt-f uppercase tracking-wider">
-    <span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">match ≤ {{ '%.2f'|format(match_threshold) }}</span>
-    <span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">dlib</span>
-    <span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">flask</span>
-    <span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">sqlite</span>
-  </div>
-</footer>
-
-<script>
-  const avatarColors = ['#3B82F6','#8B5CF6','#EC4899','#F97316','#14B8A6','#EF4444','#6366F1','#10B981'];
-  document.addEventListener("DOMContentLoaded", () => {
-    const clock = document.getElementById("live-clock");
-    if (clock) {
-      const tick = () => clock.textContent = new Date().toLocaleTimeString("en-IN", { hour12:false });
-      tick(); setInterval(tick, 1000);
-    }
-  });
-  function setConsole(msg) { const el = document.getElementById("console-text"); if (el) el.textContent = msg; }
-  function initials(name) { return name.split(" ").map(w => w[0]).join("").substring(0,2).toUpperCase(); }
-  function pct(v) { return Math.round((v || 0) * 100) + "%"; }
-</script>
+<footer class="bg-white border-t border-bdr px-5 py-2.5 flex flex-wrap justify-between items-center gap-2"><div class="font-mono text-[11px] text-txt-m flex items-center gap-1.5"><span class="text-success">●</span><span id="console-text">ready</span></div><div class="flex items-center gap-2 font-mono text-[9px] text-txt-f uppercase tracking-wider"><span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">match ≤ {{ '%.2f'|format(match_threshold) }}</span><span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">dlib</span><span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">flask</span><span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">sqlite</span></div></footer>
+<script>const avatarColors=['#3B82F6','#8B5CF6','#EC4899','#F97316','#14B8A6','#EF4444','#6366F1','#10B981'];document.addEventListener('DOMContentLoaded',()=>{const clock=document.getElementById('live-clock');if(clock){const tick=()=>clock.textContent=new Date().toLocaleTimeString('en-IN',{hour12:false});tick();setInterval(tick,1000);}});function setConsole(msg){const el=document.getElementById('console-text');if(el)el.textContent=msg}function initials(name){return name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase()}function pct(v){return Math.round((v||0)*100)+'%'}</script>
 {% block scripts %}{% endblock %}
-</body>
-</html>
+</body></html>
