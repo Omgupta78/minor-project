@@ -1,44 +1,36 @@
 # Production release checklist
 
-A green UI is not a production release. Complete every blocking item for each
-school deployment.
+A green UI is not a production release. Complete every blocking item per school.
 
-## 1. Build and regression
-- [ ] `python doctor.py` reports the current build.
-- [ ] All offline suites pass locally or in GitHub Actions.
-- [ ] Login, signup, logout, ownership and Excel export work in real Flask.
-- [ ] A database backup restores on a separate machine.
+## Build and regression
+- [ ] GitHub Actions passes, including CSS drift, dependency audit, security tests and Dockerfile validation.
+- [ ] Login, signup, logout, ownership, same-class attendance and Excel export pass in a real Flask client.
+- [ ] Start with `wsgi.py` / `wsgi:app`; never bypass the hardening with `app:app`.
+- [ ] A backup made with SQLite backup semantics restores on another machine.
 
-## 2. Recognition acceptance
-Build `testset/<roll number>/` from unseen photos and `testset/unknown/` with at
-least ten people who are not enrolled.
+## Recognition acceptance
+- [ ] Run `calibrate.py` on unseen per-student and unknown-person photos.
+- [ ] Zero false positives, precision >= 0.98 and recall >= 0.80.
+- [ ] Also test labelled classroom group photos through the complete `/api/scan` flow.
+- [ ] Re-test after changing camera, room, model, threshold or enrolment set.
+- [ ] Teacher review remains mandatory; model output is never auto-saved.
 
-```bash
-python calibrate.py --folder testset --class-id 1
-```
-
-- [ ] Calibration passes with zero false positives, precision >= 0.98 and
-      recall >= 0.80.
-- [ ] Apply the generated threshold only after reviewing the JSON report.
-- [ ] Re-test after changing camera, room, model or enrolment set.
-- [ ] Teacher review remains mandatory; never auto-save model output.
-
-## 3. Privacy and consent
-- [ ] School has lawful basis and verifiable consent for every student.
+## Privacy and consent
+- [ ] Lawful basis and verifiable consent exist for every student.
 - [ ] A retention period and deletion owner are named.
-- [ ] Faces, database, `.env`, reports and backups are absent from Git/history.
+- [ ] Faces, DB, `.env`, reports and backups are absent from current Git and all history.
+- [ ] Run `python maintenance.py` regularly; review before `--delete-orphans`.
 - [ ] Staff understand there is no liveness/anti-spoofing control.
 
-## 4. Hosting
-- [ ] Fixed random `SECRET_KEY`; HTTPS; `COOKIE_SECURE=1`.
-- [ ] `ALLOW_SIGNUP=0` after approved teachers register.
-- [ ] Persistent storage for database and faces.
-- [ ] Proxy accepts 64 MB uploads and has a 300-second timeout.
-- [ ] `/healthz` monitored; encrypted backups and restore drills scheduled.
-- [ ] Prefer one instance per school over a global biometric database.
+## Hosting
+- [ ] Fixed 32+ character `SECRET_KEY`; `PRODUCTION=1`; HTTPS; `COOKIE_SECURE=1`.
+- [ ] `ALLOW_SIGNUP=0`; approved teachers are provisioned deliberately.
+- [ ] Persistent storage, encrypted backups, restore drills and monitored `/healthz`.
+- [ ] Proxy accepts 64 MB and has a 300-second timeout.
+- [ ] Start with one Gunicorn worker; load-test before increasing concurrency.
+- [ ] Prefer one private instance per school.
 
-## 5. Pilot
-- [ ] Run at least five supervised sessions.
-- [ ] Record misses, wrong names, processing time and manual corrections.
+## Pilot
+- [ ] Run at least five supervised sessions and record errors and processing time.
 - [ ] No wrong-name result may be silently accepted.
 - [ ] A named human can disable service and revert to manual attendance.

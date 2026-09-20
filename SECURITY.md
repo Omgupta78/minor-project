@@ -1,29 +1,37 @@
 # Security policy
 
 ## Supported deployment
-The recommended model is one private instance per school. Use HTTPS, persistent
-storage, daily encrypted backups and `ALLOW_SIGNUP=0` after staff register.
-Never enable Flask debug mode on a shared network.
+Use one private instance per school, HTTPS, persistent access-controlled storage,
+daily encrypted backups and `ALLOW_SIGNUP=0`. Launch through `wsgi.py` (or
+`gunicorn ... wsgi:app`), never `app:app`, so CSRF, rate limiting, database
+hardening and production-secret validation are active. Never enable Flask debug
+mode on a shared network.
 
-Required production settings:
-- a fixed random `SECRET_KEY`;
-- `COOKIE_SECURE=1` behind HTTPS;
-- database and face folders on persistent, access-controlled storage;
-- operating-system and Python dependency updates;
-- restricted network access where possible.
+Required settings:
+- fixed random `SECRET_KEY` (production refuses a missing/short key);
+- `PRODUCTION=1`, `COOKIE_SECURE=1`, and HTTPS;
+- persistent database/face folders and tested backups;
+- one Gunicorn worker while SQLite and CPU-heavy recognition are used;
+- OS and dependency security updates.
 
 ## Biometric data
-Student photographs and embeddings are sensitive biometric data. Collect
-verifiable consent, publish retention/deletion rules, minimise access, and give
-schools a process to remove a student. Never commit `faces/`, databases,
-exports or `.env` files. Purge Git history if these were committed before.
+Photos and embeddings are sensitive biometric data. Collect verifiable consent,
+publish retention/deletion rules, minimise access, and provide student deletion.
+Never commit faces, databases, exports, backups or `.env` files. Current-tree
+deletion is not history deletion: use `git filter-repo`, rotate the public repo if
+necessary, and verify old commits when any biometric file was previously pushed.
 
-## Reporting a vulnerability
+## Controls included
+The hardened entry point provides same-origin/session CSRF validation, login
+rate limiting, a 12-hour session lifetime, security headers, SQLite WAL/busy
+timeout settings, closed-by-default signup, and a same-class guard for attendance
+mutations whose route contains both IDs.
+
+## Reporting
 Do not open a public issue containing credentials, student data, face images or
-a working exploit. Contact the repository owner privately with personal data
-removed.
+a working exploit. Contact the repository owner privately with personal data removed.
 
 ## Non-goals
-The release does not provide email password reset, liveness detection, a
-tamper-evident audit log, SSO, central key management or compliance by itself.
-Deployment owners remain responsible for those controls.
+There is still no email password reset, liveness detection, tamper-evident audit
+log, SSO, central key management or automatic legal compliance. Teacher review
+is mandatory and deployment owners remain responsible for consent and retention.
