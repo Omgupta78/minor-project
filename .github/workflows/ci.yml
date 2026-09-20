@@ -7,23 +7,34 @@ permissions:
 jobs:
   logic-and-templates:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-      - name: Install test-only dependencies
-        run: python -m pip install 'numpy<2' openpyxl pillow pillow-heif jinja2
+      - name: Install test dependencies
+        run: python -m pip install 'Flask==3.0.3' 'Werkzeug==3.0.6' 'numpy==1.26.4' 'openpyxl==3.1.5' 'Pillow==10.4.0' 'pillow-heif==0.18.0' jinja2 pip-audit
       - name: Compile Python
         run: python -m compileall -q .
-      - name: Run offline logic suites
+      - name: Run offline suites
         run: |
           set -e
-          for suite in authtest.py selftest.py smalltest.py qualitytest.py multitest.py heictest.py rendertest.py calibrationtest.py doctor.py; do
+          for suite in authtest.py selftest.py smalltest.py qualitytest.py multitest.py heictest.py rendertest.py calibrationtest.py doctor.py securitytest.py; do
             echo "=== $suite ==="
             python "$suite"
           done
-      - name: Validate CSS generation
-        run: python build_css.py
+      - name: Check generated CSS is committed
+        run: |
+          python build_css.py
+          git diff --exit-code -- static/app.css
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements.txt
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Dockerfile
+        run: docker build --check .

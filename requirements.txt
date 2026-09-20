@@ -1,28 +1,12 @@
-# Face Recognition Attendance System
-# Python 3.10 - 3.12 recommended (dlib wheels are easiest there).
-
-# --- web app ---
-Flask>=3.0.0
-Werkzeug>=3.0.0
-
-# --- production server ---
-# Flask's built-in server is single-threaded and not meant for real use.
-# Only needed when hosting for other teachers; local runs work without it.
-gunicorn>=21.2.0
-
-# --- face recognition ---
-# dlib must build before face_recognition. On Windows install
-# "Visual Studio Build Tools -> Desktop development with C++" first,
-# or use: pip install dlib-bin
-face_recognition>=1.3.0
-face-recognition-models>=0.3.0
-dlib>=19.24.0
-
-# --- imaging / maths ---
-opencv-python>=4.8.0
-numpy>=1.24.0,<2.0.0
-Pillow>=10.0.0
-pillow-heif>=0.13.0   # lets teachers upload iPhone HEIC photos
-
-# --- excel report ---
-openpyxl>=3.1.0
+# Reproducible production dependencies (Python 3.11).
+Flask==3.0.3
+Werkzeug==3.0.6
+gunicorn==21.2.0
+face_recognition==1.3.0
+face-recognition-models==0.3.0
+dlib==19.24.6
+opencv-python==4.10.0.84
+numpy==1.26.4
+Pillow==10.4.0
+pillow-heif==0.18.0
+openpyxl==3.1.5
