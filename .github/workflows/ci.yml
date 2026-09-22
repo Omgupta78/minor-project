@@ -15,7 +15,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - name: Install test dependencies
-        run: python -m pip install 'Flask==3.0.3' 'Werkzeug==3.0.6' 'numpy==1.26.4' 'opencv-python-headless==4.10.0.84' 'openpyxl==3.1.5' 'Pillow==10.4.0' 'pillow-heif==0.18.0' jinja2 pip-audit
+        run: python -m pip install 'Flask==3.0.3' 'Werkzeug==3.0.6' 'numpy==1.26.4' 'opencv-python-headless==4.10.0.84' 'openpyxl==3.1.5' 'Pillow==12.3.0' 'pillow-heif==1.3.0' jinja2 pip-audit
       - name: Compile Python
         run: python -m compileall -q .
       - name: Authentication and isolation tests
@@ -41,16 +41,7 @@ jobs:
       - name: Validate CSS generation
         run: python build_css.py
       - name: Audit Python dependencies
-        shell: bash
-        run: |
-          set +e
-          pip-audit -r requirements.txt 2>&1 | tee /tmp/audit.log
-          code=${PIPESTATUS[0]}
-          if [ "$code" -ne 0 ]; then
-            details=$(tail -n 30 /tmp/audit.log | tr '\n' '|' | sed 's/%/%25/g; s/\r/%0D/g; s/|/%0A/g')
-            echo "::error title=Dependency audit failed::$details"
-            exit "$code"
-          fi
+        run: pip-audit -r requirements.txt
   docker-build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
