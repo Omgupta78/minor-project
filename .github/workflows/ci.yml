@@ -9,13 +9,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: pip
       - name: Install test dependencies
-        run: python -m pip install 'Flask==3.0.3' 'Werkzeug==3.0.6' 'numpy==1.26.4' 'openpyxl==3.1.5' 'Pillow==10.4.0' 'pillow-heif==0.18.0' jinja2 pip-audit
+        run: python -m pip install 'Flask==3.0.3' 'Werkzeug==3.0.6' 'numpy==1.26.4' 'opencv-python-headless==4.10.0.84' 'openpyxl==3.1.5' 'Pillow==10.4.0' 'pillow-heif==0.18.0' jinja2 pip-audit
       - name: Compile Python
         run: python -m compileall -q .
       - name: Authentication and isolation tests
@@ -23,16 +23,7 @@ jobs:
       - name: Data and report tests
         run: python selftest.py
       - name: Recognition edge-case tests
-        shell: bash
-        run: |
-          set +e
-          python smalltest.py 2>&1 | tee /tmp/smalltest.log
-          code=${PIPESTATUS[0]}
-          if [ "$code" -ne 0 ]; then
-            details=$(tail -n 25 /tmp/smalltest.log | tr '\n' '|' | sed 's/%/%25/g; s/\r/%0D/g; s/|/%0A/g')
-            echo "::error title=smalltest.py failed::$details"
-            exit "$code"
-          fi
+        run: python smalltest.py
       - name: Recognition quality tests
         run: python qualitytest.py
       - name: Multi-photo tests
@@ -57,6 +48,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Validate Dockerfile
         run: docker build --check .
