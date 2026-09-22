@@ -23,7 +23,16 @@ jobs:
       - name: Data and report tests
         run: python selftest.py
       - name: Recognition edge-case tests
-        run: python smalltest.py
+        shell: bash
+        run: |
+          set +e
+          python smalltest.py 2>&1 | tee /tmp/smalltest.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            details=$(tail -n 25 /tmp/smalltest.log | tr '\n' '|' | sed 's/%/%25/g; s/\r/%0D/g; s/|/%0A/g')
+            echo "::error title=smalltest.py failed::$details"
+            exit "$code"
+          fi
       - name: Recognition quality tests
         run: python qualitytest.py
       - name: Multi-photo tests
