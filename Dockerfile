@@ -1,13 +1,14 @@
 # FaceID Attendance production image
 FROM python:3.11-slim AS builder
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential cmake git libopenblas-dev liblapack-dev libx11-dev libjpeg62-turbo-dev zlib1g-dev && rm -rf /var/lib/apt/lists/*
+# dlib-bin ships a pre-compiled wheel, so no C++ toolchain is needed.
+RUN apt-get update && apt-get install -y --no-install-recommends libjpeg62-turbo-dev zlib1g-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt .
 RUN python -m venv /opt/venv && /opt/venv/bin/pip install --upgrade pip wheel && /opt/venv/bin/pip install -r requirements.txt
 
 FROM python:3.11-slim
-RUN apt-get update && apt-get install -y --no-install-recommends libopenblas0 liblapack3 libx11-6 libjpeg62-turbo libgomp1 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libx11-6 libjpeg62-turbo libgomp1 && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app

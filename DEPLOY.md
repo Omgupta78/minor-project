@@ -79,7 +79,7 @@ student face data on the internet for a college project.
 ## Option A: Docker (works anywhere)
 
 ```bash
-docker build -t faceid-attendance .          # 5-15 min: dlib compiles
+docker build -t faceid-attendance .          # ~2 min: dlib-bin is a pre-built wheel
 docker volume create faceid-data
 
 docker run -d --name faceid \
@@ -124,7 +124,7 @@ environment variables from `.env.example`.
 sudo apt install -y python3-venv build-essential cmake libopenblas-dev
 git clone <your-repo-url> /srv/faceid && cd /srv/faceid
 python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt              # slow: dlib compiles
+pip install -r requirements.txt              # dlib-bin is a pre-built wheel; fast
 
 export SECRET_KEY="paste-the-generated-key"
 export ATTENDANCE_DB=/srv/faceid-data/attendance.db
