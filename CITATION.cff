@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you reference this academic project, cite it using this metadata."
+title: "FaceID Attendance"
+type: software
+authors:
+  - family-names: "Gupta"
+    given-names: "Om"
+version: 1.0.0
+date-released: 2026-09-22
+repository-code: "https://github.com/Omgupta78/minor-project"
+license: other
+keywords:
+  - face recognition
+  - attendance
+  - flask
+  - computer vision
+  - education
+abstract: "A teacher-operated, human-confirmed classroom attendance system using face recognition, SQLite and Excel reporting."
