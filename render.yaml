@@ -1,37 +1,37 @@
-# Render blueprint. A paid plan is required because attendance and faces need a persistent disk.
+# Render blueprint - FREE tier (ephemeral storage, data resets on redeploy).
+# For persistent data upgrade to starter plan and re-add the disk: block.
 services:
   - type: web
     name: faceid-attendance
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     region: singapore
     healthCheckPath: /healthz
-    autoDeploy: false
-    disk:
-      name: attendance-data
-      mountPath: /data
-      sizeGB: 5
+    autoDeploy: true
     envVars:
       - key: SECRET_KEY
         generateValue: true
-      # Closed by default. The first account can still bootstrap a new database.
+      # Open so you can register the first account after deploy.
+      # Set to "0" in the Render dashboard once your account is created.
       - key: ALLOW_SIGNUP
-        value: "0"
+        value: "1"
       - key: PRODUCTION
         value: "1"
+      # Free tier is HTTP only — set to 0 so login cookies work.
       - key: COOKIE_SECURE
-        value: "1"
+        value: "0"
       - key: SESSION_HOURS
         value: "12"
       - key: LOGIN_RATE_LIMIT
         value: "5"
       - key: LOGIN_RATE_WINDOW
         value: "900"
+      # Ephemeral paths — data is lost on redeploy (free tier limitation).
       - key: ATTENDANCE_DB
-        value: /data/attendance.db
+        value: /tmp/attendance.db
       - key: FACES_DIR
-        value: /data/faces
+        value: /tmp/faces
       - key: PORT
         value: "8000"
       - key: HOST
