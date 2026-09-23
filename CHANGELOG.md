@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased — 120-student hall capacity
+
+Measured against a 4000x3000 photograph of 120 real people in six rows, front
+row 4 m away and back row 15 m away. `RECOGNITION.md` holds the full results
+and `hallbench.py` reproduces them.
+
+### Fixed
+- **Scanning lost most of the class.** `decode_image_bytes()` decoded uploads
+  with OpenCV, and when `cv2.imdecode` is the first image decode in a process
+  dlib's detector is crippled for the life of that process: the hall photo
+  gave 7 faces instead of 121 through `/api/scan`, and 0 on the next scan in
+  the same worker. Enrolment goes through Pillow and was never affected, so
+  this looked like "the back of the room doesn't work". Pillow is now the
+  primary decoder, OpenCV the fallback, and `decodetest.py` asserts both paths
+  detect the same faces.
+
+### Changed — recognition
+- `SMALL_FACE_PENALTY` now defaults to 0. At 0.04 it rejected 15 of 97 seated
+  students and prevented no false matches at all, because in a hall nearly
+  every face is an enlarged one.
+- `MATCH_DISTANCE` 0.50 -> 0.52, worth three more students per photo with no
+  stranger wrongly named. 0.54 is where that stops being true.
+- Faces are encoded across worker processes. dlib holds the GIL so threads
+  give 1.02x; four processes give 3.7x, taking a 120-face scan from 36 s to
+  18 s. `SCAN_WORKERS` controls it, the pool declines when the caller has no
+  `if __name__ == "__main__":` guard (workers would re-run the script), and
+  any failure falls back to serial rather than failing the scan.
+- The runner-up comparison is vectorised; it ran 120 faces x 600 gallery rows
+  in Python on every photo.
+- Scans report face sizes (`median_face_px`, `smallest_face_px`,
+  `faces_too_small`). Below about 45 px a face is detected but not
+  identifiable, and no threshold changes that — the fix is a closer photo, so
+  the app now says so.
+
+### Changed — using it with 120 students
+- The review list filters, searches and repaints one row per tap instead of
+  rebuilding all 120, and offers "accept all suggested" so a hall session is
+  not twenty individual clicks.
+- The scan returns advice the teacher can act on: how many faces were too
+  small to identify, and which students are enrolled from a single photo
+  (three photos is worth about seven more students per 120).
+- The students page shows each student's reference-photo count and flags
+  anyone enrolled from one photo.
+- The scan banner shows elapsed seconds; a hall photo takes tens of them.
+- `MAX_UPLOAD_MB` 64 -> 96, since eight photos from a 48 MP phone overflowed.
+
+### Added
+- `halltest.py` — 120 students end to end (scan, confirm, records, register,
+  Excel) against a stub, so CI covers hall scale without dlib.
+- `decodetest.py` — the upload and file decode paths must agree.
+- `hallbench.py` — composes a hall from a labelled folder and reports
+  identification rate against face width, row by row.
+- `RECOGNITION.md` — the measurements, including what was tried and rejected.
+- `rendertest.py` now parses every inline script block, and CI runs the new
+  suites.
+
 ## Unreleased — code-base review fixes
 
 ### Fixed (data loss and deployment)

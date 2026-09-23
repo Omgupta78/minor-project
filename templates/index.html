@@ -169,15 +169,40 @@
           <span>Nothing is saved until you press Confirm. Correct any mistakes first &mdash; you are the final authority, not the model.</span>
         </div>
 
+        <!-- Advice the teacher can act on between one photo and the next:
+             faces too small to identify, or students enrolled from one photo. -->
+        <div id="scan-hints" class="hidden px-4 py-2.5 bg-warn-light border-b border-warn/30 text-[11px] text-warn flex-col gap-1"></div>
+
+        <div class="px-3 py-2 border-b border-bdr flex flex-col gap-2">
+          <div class="relative">
+            <span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-txt-f text-[16px]">search</span>
+            <input id="review-search" type="search" placeholder="Find a student by name or roll number"
+                   oninput="renderReview()" autocomplete="off"
+                   class="w-full border border-bdr rounded-lg pl-8 pr-3 py-1.5 text-xs focus:ring-primary focus:border-primary"/>
+          </div>
+          <div class="flex gap-1.5 flex-wrap" id="review-filters">
+            <button type="button" data-filter="all"     onclick="setFilter('all')"     class="review-chip">All <span class="font-mono" id="count-all">0</span></button>
+            <button type="button" data-filter="review"  onclick="setFilter('review')"  class="review-chip">Needs a look <span class="font-mono" id="count-review">0</span></button>
+            <button type="button" data-filter="present" onclick="setFilter('present')" class="review-chip">Present <span class="font-mono" id="count-present">0</span></button>
+            <button type="button" data-filter="absent"  onclick="setFilter('absent')"  class="review-chip">Absent <span class="font-mono" id="count-absent">0</span></button>
+          </div>
+        </div>
+
         <div class="overflow-y-auto" id="review-list" style="max-height:430px">
           <div class="text-center text-txt-f text-xs py-12 px-4">
             Scan your class photos and every student will appear here for you to check.
           </div>
         </div>
 
-        <div class="p-3 border-t border-bdr flex gap-2">
-          <button type="button" onclick="markAll('absent')" class="flex-1 text-xs border border-bdr rounded-lg py-2 text-txt-m hover:border-danger hover:text-danger transition-colors">Clear all</button>
-          <button type="button" onclick="markAll('present')" class="flex-1 text-xs border border-bdr rounded-lg py-2 text-txt-m hover:border-success hover:text-success transition-colors">Mark all present</button>
+        <div class="p-3 border-t border-bdr flex flex-col gap-2">
+          <button type="button" id="accept-suggested" onclick="acceptSuggested()" disabled
+            class="w-full text-xs border border-primary/40 bg-primary-light text-primary rounded-lg py-2 font-semibold hover:bg-blue-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            Accept all <span class="font-mono" id="suggested-count">0</span> suggested
+          </button>
+          <div class="flex gap-2">
+            <button type="button" onclick="markAll('absent')" class="flex-1 text-xs border border-bdr rounded-lg py-2 text-txt-m hover:border-danger hover:text-danger transition-colors">Clear all</button>
+            <button type="button" onclick="markAll('present')" class="flex-1 text-xs border border-bdr rounded-lg py-2 text-txt-m hover:border-success hover:text-success transition-colors">Mark all present</button>
+          </div>
         </div>
       </div>
 
@@ -245,7 +270,8 @@ let roster = {{ students|map(attribute='id')|list|tojson }}.map((id, i) => ({
   id: id,
   roll_no: {{ students|map(attribute='roll_no')|list|tojson }}[i],
   name: {{ students|map(attribute='name')|list|tojson }}[i],
-  status: "absent", confidence: null, manual: false, note: "", photo: null
+  status: "absent", confidence: null, manual: false, note: "", photo: null,
+  references: null
 }));
 
 function switchClass(id) { window.location = "/?class_id=" + id; }
@@ -368,6 +394,12 @@ function resetScan() {
   document.getElementById("review-list").innerHTML =
     '<div class="text-center text-txt-f text-xs py-12 px-4">Scan your class photos and every student will appear here for you to check.</div>';
   document.getElementById("review-present").textContent = "0";
+  const hintBox = document.getElementById("scan-hints");
+  hintBox.classList.add("hidden"); hintBox.classList.remove("flex");
+  const search = document.getElementById("review-search");
+  if (search) search.value = "";
+  reviewFilter = "all";
+  refreshCounts();
   refreshPhotoUI();
   setHud("READY", "muted");
 }
@@ -416,6 +448,13 @@ async function runScan() {
   const btn = document.getElementById("scan-btn");
   btn.disabled = true;
   document.getElementById("proc-banner").classList.replace("hidden", "flex");
+  const started = Date.now();
+  const tick = setInterval(() => {
+    const secs = Math.round((Date.now() - started) / 1000);
+    document.getElementById("proc-text").textContent =
+      "Detecting and identifying faces in " + photos.length +
+      (photos.length === 1 ? " photo" : " photos") + " — " + secs + "s";
+  }, 1000);
   document.getElementById("proc-text").textContent =
     "Detecting faces in " + photos.length + (photos.length === 1 ? " photo…" : " photos…");
   setHud("PROCESSING…", "primary");
@@ -451,6 +490,7 @@ async function runScan() {
       const hit = byId[s.id];
       s.manual = false;
       s.photo = hit ? hit.photo : null;
+      s.references = hit ? hit.references : s.references;
       if (hit && hit.status === "matched") {
         s.status = "present"; s.confidence = hit.confidence; s.note = "";
       } else if (hit && hit.status === "review") {
@@ -460,6 +500,17 @@ async function runScan() {
       }
     });
 
+    const hintBox = document.getElementById("scan-hints");
+    if (data.hints && data.hints.length) {
+      hintBox.innerHTML = data.hints
+        .map(h => '<div class="flex items-start gap-1.5"><span class="material-symbols-outlined text-[14px] mt-px">tips_and_updates</span><span>' + esc(h) + '</span></div>')
+        .join("");
+      hintBox.classList.remove("hidden"); hintBox.classList.add("flex");
+    } else {
+      hintBox.classList.add("hidden"); hintBox.classList.remove("flex");
+    }
+
+    reviewFilter = data.needs_review ? "review" : "all";
     renderReview();
     refreshPhotoUI();
     document.getElementById("confirm-btn").disabled = false;
@@ -467,6 +518,7 @@ async function runScan() {
 
     let msg = data.total_faces + " faces across " + (data.images || []).length +
               " photo(s) · " + data.matched + " identified";
+    if (data.median_face_px) msg += " · median face " + data.median_face_px + "px";
     if (data.repeats) msg += " · " + data.repeats + " repeat sighting(s) merged";
     setConsole(msg);
     if (data.skipped && data.skipped.length) {
@@ -475,6 +527,7 @@ async function runScan() {
   } catch (err) {
     setHud("ERROR", "danger"); alert("Scan failed: " + err.message);
   } finally {
+    clearInterval(tick);
     document.getElementById("proc-banner").classList.replace("flex", "hidden");
     btn.disabled = false;
   }
@@ -523,27 +576,47 @@ function drawPhoto() {
   img.src = p.dataUrl;
 }
 
-/* ---------- review ---------- */
-function renderReview() {
-  const list = document.getElementById("review-list");
-  list.innerHTML = roster.map((s, i) => {
-    const on = s.status === "present";
-    const conf = s.confidence !== null && s.confidence !== undefined
-      ? '<span class="font-mono text-[10px] ' + (s.confidence >= 0.6 ? 'text-success' : 'text-warn') + '">' + Math.round(s.confidence * 100) + '% match</span>'
-      : '<span class="font-mono text-[10px] text-txt-f">not detected</span>';
-    const where = s.photo && photos.length > 1
-      ? '<button type="button" onclick="selectPhoto(' + (s.photo - 1) + ')" class="text-[10px] text-primary hover:underline"> · photo ' + s.photo + '</button>'
-      : '';
-    const note = s.note
-      ? '<span class="text-[10px] text-warn"> · ' + esc(s.note) + '</span>' : '';
-    return `
+/* ---------- review ----------
+   A hall roster is 120 rows. Rebuilding all of them on every tap made the
+   list visibly stutter and lost the scroll position, so a toggle now repaints
+   only the row that changed and the counters. The full render runs on a scan,
+   a filter change or a search. */
+let reviewFilter = "all";
+
+function matchesFilter(s) {
+  if (reviewFilter === "present") return s.status === "present";
+  if (reviewFilter === "absent") return s.status !== "present";
+  if (reviewFilter === "review") return !!s.note;
+  return true;
+}
+
+function matchesSearch(s, needle) {
+  if (!needle) return true;
+  return (s.name + " " + s.roll_no).toLowerCase().includes(needle);
+}
+
+function rowHtml(s, i) {
+  const on = s.status === "present";
+  const conf = s.confidence !== null && s.confidence !== undefined
+    ? '<span class="font-mono text-[10px] ' + (s.confidence >= 0.6 ? 'text-success' : 'text-warn') + '">' + Math.round(s.confidence * 100) + '% match</span>'
+    : '<span class="font-mono text-[10px] text-txt-f">not detected</span>';
+  const where = s.photo && photos.length > 1
+    ? '<button type="button" onclick="selectPhoto(' + (s.photo - 1) + ')" class="text-[10px] text-primary hover:underline"> · photo ' + s.photo + '</button>'
+    : '';
+  const note = s.note
+    ? '<span class="text-[10px] text-warn"> · ' + esc(s.note) + '</span>' : '';
+  /* One reference photo is the commonest reason a student is missed, and the
+     teacher can fix it in a minute, so flag it where they will see it. */
+  const thin = s.references === 1
+    ? '<span class="text-[10px] text-txt-f" title="Enrolled from one photo. Add two more for a better chance of being recognised."> · 1 photo</span>' : '';
+  return `
     <div class="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-bdr last:border-0 ${on ? 'bg-success-light/40' : ''}">
       <div class="flex items-center gap-2.5 min-w-0">
         <div class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0"
              style="background:${avatarColors[i % avatarColors.length]}">${esc(initials(s.name))}</div>
         <div class="min-w-0">
           <div class="text-sm font-medium text-txt truncate">${esc(s.name)}</div>
-          <div class="text-[10px] font-mono text-txt-f truncate">${esc(s.roll_no)} · ${conf}${where}${note}</div>
+          <div class="text-[10px] font-mono text-txt-f truncate">${esc(s.roll_no)} · ${conf}${where}${note}${thin}</div>
         </div>
       </div>
       <button type="button" onclick="toggle(${i})" aria-pressed="${on}"
@@ -553,15 +626,69 @@ function renderReview() {
         ${on ? 'PRESENT' : 'ABSENT'}
       </button>
     </div>`;
-  }).join("");
-  document.getElementById("review-present").textContent = roster.filter(s => s.status === "present").length;
+}
+
+function renderReview() {
+  const list = document.getElementById("review-list");
+  const needle = (document.getElementById("review-search")?.value || "").trim().toLowerCase();
+  const shown = roster
+    .map((s, i) => [s, i])
+    .filter(([s]) => matchesFilter(s) && matchesSearch(s, needle));
+
+  list.innerHTML = shown.length
+    ? shown.map(([s, i]) => `<div data-row="${i}">${rowHtml(s, i)}</div>`).join("")
+    : '<div class="text-center text-txt-f text-xs py-12 px-4">No student matches that filter.</div>';
+  refreshCounts();
+}
+
+function refreshCounts() {
+  const present = roster.filter(s => s.status === "present").length;
+  const suggested = roster.filter(s => s.note && s.status !== "present").length;
+  document.getElementById("review-present").textContent = present;
+  document.getElementById("count-all").textContent = roster.length;
+  document.getElementById("count-present").textContent = present;
+  document.getElementById("count-absent").textContent = roster.length - present;
+  document.getElementById("count-review").textContent =
+    roster.filter(s => !!s.note).length;
+  const accept = document.getElementById("accept-suggested");
+  document.getElementById("suggested-count").textContent = suggested;
+  accept.disabled = suggested === 0;
+  document.querySelectorAll("#review-filters [data-filter]").forEach(b => {
+    b.classList.toggle("is-active", b.dataset.filter === reviewFilter);
+  });
+}
+
+function setFilter(name) { reviewFilter = name; renderReview(); }
+
+function repaintRow(i) {
+  const holder = document.querySelector(`#review-list [data-row="${i}"]`);
+  if (!holder) { renderReview(); return; }
+  /* If the row no longer belongs in the current filter, fall back to a full
+     render so it disappears rather than lingering in a stale list. */
+  if (!matchesFilter(roster[i])) { renderReview(); return; }
+  holder.innerHTML = rowHtml(roster[i], i);
+  refreshCounts();
 }
 
 function toggle(i) {
   roster[i].status = roster[i].status === "present" ? "absent" : "present";
   roster[i].manual = true;
-  renderReview();
+  repaintRow(i);
 }
+
+/* The scan leaves borderline students absent with a note. In a hall that can
+   be twenty people, and clicking twenty rows by hand is how a teacher decides
+   the app is not worth using. */
+function acceptSuggested() {
+  let n = 0;
+  roster.forEach(s => {
+    if (s.note && s.status !== "present") { s.status = "present"; s.manual = true; n++; }
+  });
+  renderReview();
+  document.getElementById("confirm-btn").disabled = false;
+  setConsole("accepted " + n + " suggested student(s)");
+}
+
 function markAll(status) {
   roster.forEach(s => { s.status = status; s.manual = true; });
   renderReview();

@@ -61,7 +61,7 @@ MAX_PHOTOS_PER_SCAN = int(os.environ.get("MAX_PHOTOS_PER_SCAN", "8"))
 app = Flask(__name__)
 # Total request size. A session can carry several photos, and modern phone
 # cameras produce 4-8 MB each, so this is a batch budget rather than per-file.
-MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "64"))
+MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "96"))
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 
 # The signing key for the login cookie. A random fallback is fine for a single
@@ -359,6 +359,10 @@ def students_page():
             s["id"]: s
             for s in db.attendance_summary(conn, class_id, teacher_id=tid)
         }
+        # How many reference photos each student has. One is the commonest
+        # reason a student is missed in a big room, and this page is where the
+        # teacher can do something about it.
+        references = db.encoding_counts(conn, class_id)
     return render_template(
         "students_page.html",
         active_page="students",
@@ -366,6 +370,7 @@ def students_page():
         class_id=class_id,
         students=students,
         summary=summary,
+        references=references,
     )
 
 
@@ -704,6 +709,7 @@ def api_scan():
             return jsonify({"error": "That class no longer exists."}), 404
         _, labels, matrix = db.known_faces(conn, class_id, teacher_id=teacher_id())
         roster = db.list_students(conn, class_id, teacher_id=teacher_id())
+        reference_counts = db.encoding_counts(conn, class_id)
 
     if not len(matrix):
         return jsonify(
@@ -720,10 +726,29 @@ def api_scan():
     best = recognition.merge_across_images(per_image)
     stats = recognition.summarise(per_image, best)
 
+    # Two things decide whether a big room works, and the teacher can fix both
+    # between one photo and the next, so say which one is biting.
+    hints: list[str] = []
+    if stats["faces_too_small"]:
+        hints.append(
+            f"{stats['faces_too_small']} face(s) are narrower than "
+            f"{stats['readable_face_px']} px. Faces that small are usually "
+            "detected but not identified. Add a photo taken closer to the back "
+            "rows, or zoom in on them - the best sighting of each student wins."
+        )
+    thin = [s["name"] for s in roster if reference_counts.get(s["id"], 0) < 2]
+    if thin:
+        shown = ", ".join(thin[:5]) + ("..." if len(thin) > 5 else "")
+        hints.append(
+            f"{len(thin)} student(s) are enrolled from a single photo ({shown}). "
+            "Three photos per student identifies noticeably more of the room."
+        )
+
     payload = {
         "class_id": class_id,
         "class_name": klass["name"],
         "skipped": skipped,
+        "hints": hints,
         "images": [
             {
                 "index": index,
@@ -747,6 +772,8 @@ def api_scan():
                 # Which photo produced the best sighting, so the teacher can
                 # jump straight to the evidence for a borderline match.
                 "photo": best[s["id"]].image_index + 1 if s["id"] in best else None,
+                "references": reference_counts.get(s["id"], 0),
+                "face_px": best[s["id"]].face_px if s["id"] in best else None,
             }
             for s in roster
         ],

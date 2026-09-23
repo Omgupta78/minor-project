@@ -65,6 +65,7 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("no Tailwind CDN dependency", "templates/base.html", "cdn.tailwindcss.com", False),
     ("iPhone HEIC photos accepted", "recognition.py", "HEIF_EXTS", True),
     ("HEIC fallback decoder for scans", "recognition.py", "def decode_with_pillow", True),
+    ("upload and file decode paths agree", "decodetest.py", "same faces", True),
     ("upload form offers HEIC", "templates/index.html", ".heic", True),
     ("pillow-heif in requirements", "requirements.txt", "pillow-heif", True),
     # --- teacher accounts and data isolation ---
@@ -86,6 +87,18 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("container image definition", "Dockerfile", "", True),
     ("deployment guide", "DEPLOY.md", "", True),
     ("production server in requirements", "requirements.txt", "gunicorn", True),
+    # --- 120-student hall capacity ---
+    ("parallel face encoding", "recognition.py", "def _encode_jobs_parallel", True),
+    ("worker count is configurable", "recognition.py", "SCAN_WORKERS", True),
+    ("face size reported to the teacher", "recognition.py", "READABLE_FACE_PX", True),
+    ("scan returns actionable hints", "app.py", '"hints": hints', True),
+    ("review list filters and searches", "templates/index.html", "review-search", True),
+    ("bulk accept for a long roster", "templates/index.html", "function acceptSuggested", True),
+    ("one row repaints, not all 120", "templates/index.html", "function repaintRow", True),
+    ("reference photo count per student", "app.py", "reference_counts", True),
+    ("120-student capacity test", "halltest.py", "STUDENTS = 120", True),
+    ("hall benchmark harness", "hallbench.py", "def face_px_at", True),
+    ("measured results written down", "RECOGNITION.md", "face width", True),
 ]
 
 

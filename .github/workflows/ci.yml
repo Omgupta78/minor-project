@@ -24,6 +24,10 @@ jobs:
         run: python selftest.py
       - name: HTTP API tests
         run: python apitest.py
+      - name: 120-student capacity tests
+        run: python halltest.py
+      - name: Image decode path tests
+        run: python decodetest.py
       - name: Recognition edge-case tests
         run: python smalltest.py
       - name: Recognition quality tests

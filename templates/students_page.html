@@ -71,7 +71,13 @@
             <td class="px-4 py-2.5 text-xs text-txt-m">{{ s.class_name or '—' }}</td>
             <td class="px-4 py-2.5 text-center">
               {% if s.has_encoding %}
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-success-light text-success border border-success/20">READY</span>
+              {% set refs = (references or {}).get(s.id, 1) %}
+              {% if refs >= 2 %}
+              <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-success-light text-success border border-success/20">READY · {{ refs }} PHOTOS</span>
+              {% else %}
+              <span title="Enrolled from a single photo. Re-enrol with three photos - front on, turned slightly left, slightly right - to be recognised more often from the back of the room."
+                    class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-warn-light text-warn border border-warn/20">READY · 1 PHOTO</span>
+              {% endif %}
               {% else %}
               <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-warn-light text-warn border border-warn/20">NO FACE</span>
               {% endif %}
