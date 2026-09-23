@@ -18,9 +18,11 @@ services:
         value: "1"
       - key: PRODUCTION
         value: "1"
-      # Free tier is HTTP only — set to 0 so login cookies work.
+      # Render terminates TLS and serves *.onrender.com over HTTPS on every
+      # plan, so the login cookie can and should carry the Secure flag. Only
+      # set this to "0" if you are reaching the app over plain http.
       - key: COOKIE_SECURE
-        value: "0"
+        value: "1"
       - key: SESSION_HOURS
         value: "12"
       - key: LOGIN_RATE_LIMIT

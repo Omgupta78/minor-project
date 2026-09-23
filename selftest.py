@@ -127,4 +127,46 @@ for d in (0.20, 0.35, 0.45, 0.50, 0.55, 0.65, 0.80):
 vals = [recognition.distance_to_confidence(d) for d in (0.2, 0.35, 0.5, 0.65, 0.8)]
 assert vals == sorted(vals, reverse=True), vals
 
+print("14. regressions")
+os.environ["ATTENDANCE_DB"] = str(INSTANCE / "regress.db")
+(INSTANCE / "regress.db").unlink(missing_ok=True)
+importlib.reload(db)
+db.init_db()
+with db.session_scope() as conn:
+    # create_class used to return cur.lastrowid after an INSERT OR IGNORE that
+    # inserted nothing. On a reused connection that is the id of whatever was
+    # inserted last, so asking for an existing class handed back a different
+    # one and students were enrolled into the wrong roster.
+    import auth
+    tid = auth.create_teacher(conn, "t@example.edu", "T", "password1", rounds=1000)
+    first = db.create_class(conn, "Maths", "Algebra", teacher_id=tid)
+    other = db.create_class(conn, "Physics", "Optics", teacher_id=tid)
+    again = db.create_class(conn, "Maths", "Algebra", teacher_id=tid)
+    assert again == first, f"duplicate class returned {again}, expected {first}"
+    assert again != other, "duplicate class returned the most recent insert"
+    # An unclaimed class (no teacher) must be idempotent too: SQLite does not
+    # apply a UNIQUE constraint across NULLs, so the importer used to create a
+    # fresh class on every run.
+    free = db.create_class(conn, "Unclaimed", "None")
+    assert db.create_class(conn, "Unclaimed", "None") == free
+    print("   create_class returns the existing class, not the last insert")
+
+    # Every reference photo has to be reachable, or re-enrolling and deleting
+    # a student both leave files behind in faces/.
+    sid = db.create_student(conn, "R-1", "Test Student", first, "r1.jpg",
+                            np.random.rand(128))
+    db.add_student_encoding(conn, sid, np.random.rand(128), "r1_2.jpg")
+    db.add_student_encoding(conn, sid, np.random.rand(128), "r1_3.jpg")
+    names = db.student_photo_names(conn, sid)
+    assert names == {"r1.jpg", "r1_2.jpg", "r1_3.jpg"}, names
+    print(f"   student_photo_names finds all {len(names)} reference photos")
+
+    # known_faces must still return one row per reference photo now that the
+    # extras are fetched with a scoped query instead of a full table read.
+    _ids, labels, matrix = db.known_faces(conn, first)
+    assert matrix.shape == (3, 128), matrix.shape
+    assert {l["id"] for l in labels} == {sid}
+    assert db.encoding_counts(conn, first)[sid] == 3
+    print("   known_faces still returns every reference photo")
+
 print("\nALL CHECKS PASSED")

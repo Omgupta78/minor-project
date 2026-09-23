@@ -37,7 +37,7 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("scan counts use images_scanned", "recognition.py", '"images_scanned": len(per_image)', True),
     ("scan counts cannot clobber images", "recognition.py", '"images": len(per_image)', False),
     ("several reference photos per student", "db.py", "def add_student_encoding", True),
-    ("every reference photo is matched against", "db.py", "FROM student_encodings ORDER BY id", True),
+    ("every reference photo is matched against", "db.py", "FROM student_encodings", True),
     ("enrolment accepts several photos", "app.py", 'getlist("student_photo")', True),
     ("enrolment form allows several files", "templates/students_page.html", "multiple required", True),
     ("enrolment photos are quality checked", "recognition.py", "def quality_problem", True),

@@ -17,6 +17,7 @@ env = Environment(loader=FileSystemLoader(str(BASE_DIR / "templates")))
 env.globals["get_flashed_messages"] = lambda **k: [
     ("success", "Student added successfully."),
     ("error", "No face detected in that photo."),
+    ("warning", "One photo was rejected and the rest were kept."),
 ]
 # Static assets must resolve to real files, otherwise the screenshots below
 # render unstyled and silently "pass". Relative paths work from /data/render.
@@ -57,6 +58,8 @@ with db.session_scope() as conn:
         class_id=cid,
         today="2026-09-09",
         teacher=teacher,
+        max_photos_per_scan=8,
+        max_enrol_photos=5,
     )
 
     cases = [
@@ -77,6 +80,11 @@ with db.session_scope() as conn:
         with open(RENDER_DIR / name, "w") as fh:
             fh.write(html)
         leaks = [t for t in FAKE if t in html]
+        assert "{{" not in html, f"{name}: an unrendered Jinja expression survived"
+        if name == "index.html":
+            # A missing context value would render as "const MAX_PHOTOS = ;"
+            # which is a syntax error that takes the whole page's JS with it.
+            assert "const MAX_PHOTOS = 8;" in html, "photo limit did not render"
         print(f"OK  {name:<22} {len(html):>6} bytes   fake-data leaks: {leaks or 'none'}")
 
     # Empty-workspace states must not crash either.
@@ -130,5 +138,12 @@ with db.session_scope() as conn:
     assert "/logout" not in h, "logged-out nav still shows a logout control"
     assert teacher["name"] not in h, "logged-out nav still shows a teacher name"
     print(f"OK  index.html (no login)  {len(h):>6} bytes")
+
+# A flashed warning used to fall through to the success branch, so a rejected
+# enrolment photo was reported with a green tick.
+warned = env.get_template("base.html").render(**dict(base, active_page=""))
+assert "bg-warn-light" in warned, "a warning flash is not styled as a warning"
+assert warned.count("check_circle") == 1, "a warning flash shows the success icon"
+print("OK  warning flashes styled distinctly")
 
 print("\nALL TEMPLATES RENDER")

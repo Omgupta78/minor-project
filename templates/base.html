@@ -31,7 +31,7 @@ body{background:#f5f8fd;color:#10204a}.blink{animation:blink 1s step-end infinit
   </div>
 </nav>
 <main class="app-main flex-1 bg-bg p-4 md:p-6">
-{% with messages=get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-stack max-w-6xl mx-auto mb-4 flex flex-col gap-2">{% for category,message in messages %}<div class="flex items-start gap-2 px-4 py-3 rounded-lg border text-sm fade-in {{ 'bg-danger-light border-danger/30 text-danger' if category == 'error' else 'bg-success-light border-success/30 text-green-800' }}"><span class="material-symbols-outlined text-[18px] flex-shrink-0">{{ 'error' if category == 'error' else 'check_circle' }}</span><span>{{ message }}</span></div>{% endfor %}</div>{% endif %}{% endwith %}
+{% with messages=get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-stack max-w-6xl mx-auto mb-4 flex flex-col gap-2">{% for category,message in messages %}{% set tone = {'error': ('bg-danger-light border-danger/30 text-danger', 'error'), 'warning': ('bg-warn-light border-warn/30 text-warn', 'warning')}.get(category, ('bg-success-light border-success/30 text-green-800', 'check_circle')) %}<div class="flex items-start gap-2 px-4 py-3 rounded-lg border text-sm fade-in {{ tone[0] }}"><span class="material-symbols-outlined text-[18px] flex-shrink-0">{{ tone[1] }}</span><span>{{ message }}</span></div>{% endfor %}</div>{% endif %}{% endwith %}
 {% block content %}{% endblock %}
 </main>
 <nav class="mobile-bottom-nav" aria-label="Primary navigation">

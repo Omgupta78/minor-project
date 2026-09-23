@@ -87,7 +87,7 @@
             </div>
             <div class="text-center">
               <p class="text-txt-m text-sm">Drop one or more photos of the class here</p>
-              <p class="text-txt-f text-xs mt-0.5">Up to <span id="max-photos">8</span> photos · JPG, PNG or HEIC</p>
+              <p class="text-txt-f text-xs mt-0.5">Up to <span id="max-photos">{{ max_photos_per_scan|default(8) }}</span> photos · JPG, PNG or HEIC</p>
             </div>
             <div class="flex flex-wrap gap-3 justify-center">
               <label for="file-input" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2.5 rounded-lg cursor-pointer flex items-center gap-2 transition-colors shadow-sm">
@@ -234,7 +234,7 @@
 {% block scripts %}
 <script>
 const CLASS_ID = {{ class_id or 'null' }};
-const MAX_PHOTOS = 8;
+const MAX_PHOTOS = {{ max_photos_per_scan|default(8) }};
 
 /* photos = [{ file, dataUrl, width, height, faces }] */
 let photos = [];
@@ -249,6 +249,16 @@ let roster = {{ students|map(attribute='id')|list|tojson }}.map((id, i) => ({
 }));
 
 function switchClass(id) { window.location = "/?class_id=" + id; }
+
+/* Student names and roll numbers are typed by a teacher and stored, so they
+   are untrusted by the time they come back out of the database. Every one of
+   them below lands in innerHTML, where a name like <img onerror=...> would
+   run as script for whoever opens the page. Escape on the way in. */
+function esc(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 
 document.getElementById("max-photos") && (document.getElementById("max-photos").textContent = MAX_PHOTOS);
 
@@ -525,15 +535,15 @@ function renderReview() {
       ? '<button type="button" onclick="selectPhoto(' + (s.photo - 1) + ')" class="text-[10px] text-primary hover:underline"> · photo ' + s.photo + '</button>'
       : '';
     const note = s.note
-      ? '<span class="text-[10px] text-warn"> · ' + s.note + '</span>' : '';
+      ? '<span class="text-[10px] text-warn"> · ' + esc(s.note) + '</span>' : '';
     return `
     <div class="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-bdr last:border-0 ${on ? 'bg-success-light/40' : ''}">
       <div class="flex items-center gap-2.5 min-w-0">
         <div class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0"
-             style="background:${avatarColors[i % avatarColors.length]}">${initials(s.name)}</div>
+             style="background:${avatarColors[i % avatarColors.length]}">${esc(initials(s.name))}</div>
         <div class="min-w-0">
-          <div class="text-sm font-medium text-txt truncate">${s.name}</div>
-          <div class="text-[10px] font-mono text-txt-f truncate">${s.roll_no} · ${conf}${where}${note}</div>
+          <div class="text-sm font-medium text-txt truncate">${esc(s.name)}</div>
+          <div class="text-[10px] font-mono text-txt-f truncate">${esc(s.roll_no)} · ${conf}${where}${note}</div>
         </div>
       </div>
       <button type="button" onclick="toggle(${i})" aria-pressed="${on}"

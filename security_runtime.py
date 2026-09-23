@@ -69,10 +69,29 @@ def _rate_key() -> str:
     return f"{request.remote_addr or 'unknown'}:{email_hash}"
 
 
+# Cap on how many distinct (ip, email) buckets are remembered. Without it a
+# script that posts a different email each time adds one deque per attempt and
+# the worker's memory grows until it is killed -- the rate limiter itself
+# becomes the denial of service it was added to prevent.
+_MAX_BUCKETS = int(os.environ.get("LOGIN_RATE_BUCKETS", "4096"))
+
+
+def _expire_buckets(now: float, window: int) -> None:
+    """Drop buckets whose attempts have all aged out."""
+    for key in [k for k, v in _ATTEMPTS.items() if not v or now - v[-1] > window]:
+        del _ATTEMPTS[key]
+
+
 def _login_limited() -> bool:
     now = time.monotonic()
     window = int(os.environ.get("LOGIN_RATE_WINDOW", "900"))
     limit = int(os.environ.get("LOGIN_RATE_LIMIT", "5"))
+    if len(_ATTEMPTS) >= _MAX_BUCKETS:
+        _expire_buckets(now, window)
+        if len(_ATTEMPTS) >= _MAX_BUCKETS:
+            # Still full of live buckets: this is an attack, not normal use.
+            # Refusing is the safe direction to fail in.
+            return True
     bucket = _ATTEMPTS[_rate_key()]
     while bucket and now - bucket[0] > window:
         bucket.popleft()

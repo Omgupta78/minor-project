@@ -22,6 +22,8 @@ jobs:
         run: python authtest.py
       - name: Data and report tests
         run: python selftest.py
+      - name: HTTP API tests
+        run: python apitest.py
       - name: Recognition edge-case tests
         run: python smalltest.py
       - name: Recognition quality tests

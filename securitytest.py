@@ -39,4 +39,17 @@ headers = {"Origin": "http://localhost"}
 assert client.post("/login", data={"email": "a@example.com"}, headers=headers).status_code == 200
 assert client.post("/login", data={"email": "a@example.com"}, headers=headers).status_code == 429
 
+# The attempt table used to grow by one deque per distinct email, so a script
+# posting a fresh address each time could exhaust the worker's memory: the
+# rate limiter becoming the denial of service it exists to prevent.
+security_runtime._ATTEMPTS.clear()
+security_runtime._MAX_BUCKETS = 32
+for n in range(200):
+    client.post("/login", data={"email": f"flood{n}@example.com"}, headers=headers)
+assert len(security_runtime._ATTEMPTS) <= 32, len(security_runtime._ATTEMPTS)
+
+# A real teacher is still served once the flood ages out of the table.
+security_runtime._ATTEMPTS.clear()
+assert client.post("/login", data={"email": "real@example.com"}, headers=headers).status_code == 200
+
 print("securitytest: all checks passed")

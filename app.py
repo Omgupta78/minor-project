@@ -108,6 +108,29 @@ def parse_int(value, default=None):
         return default
 
 
+def clean_date(value) -> str | None:
+    """Accept only a real YYYY-MM-DD date.
+
+    sessions.date is compared with plain string >= / <= everywhere (records
+    filters, the Excel range, dashboard_stats), so a free-text date silently
+    sorts into the wrong place and drops out of every range the teacher picks.
+    Rejecting it here is the only place that can still tell the teacher why.
+    """
+    text = str(value or "").strip()
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return None
+
+
+def clean_period(value) -> str | None:
+    """Periods are short labels ('1', '2A'). Anything longer is a mistake."""
+    text = str(value if value is not None else "").strip() or "1"
+    if len(text) > 8 or not re.fullmatch(r"[A-Za-z0-9._-]+", text):
+        return None
+    return text
+
+
 # ------------------------------------------------------------------ accounts
 # Endpoints reachable without logging in. Everything else is private, enforced
 # by one before_request hook rather than a decorator on each route: forgetting
@@ -263,6 +286,8 @@ def inject_globals():
             "today": date.today().isoformat(),
             "match_threshold": recognition.MATCH_DISTANCE,
             "teacher": None,
+            "max_photos_per_scan": MAX_PHOTOS_PER_SCAN,
+            "max_enrol_photos": MAX_ENROL_PHOTOS,
         }
     with get_db() as conn:
         classes = db.list_classes(conn, teacher_id=tid)
@@ -274,6 +299,12 @@ def inject_globals():
         "today": date.today().isoformat(),
         "match_threshold": recognition.MATCH_DISTANCE,
         "teacher": teacher,
+        # Published so the page cannot disagree with the server about the
+        # limits. A hardcoded 8 in the JavaScript meant that raising
+        # MAX_PHOTOS_PER_SCAN did nothing, and lowering it produced a 400
+        # from /api/scan after the teacher had already picked the photos.
+        "max_photos_per_scan": MAX_PHOTOS_PER_SCAN,
+        "max_enrol_photos": MAX_ENROL_PHOTOS,
     }
 
 
@@ -440,6 +471,7 @@ def add_student():
     encodings: list = []
     saved: list[Path] = []
     rejected: list[str] = []
+    superseded: set[str] = set()
 
     for position, photo in enumerate(photos, start=1):
         ext = Path(photo.filename).suffix.lower()
@@ -519,6 +551,10 @@ def add_student():
             ).fetchone()
             if existing:
                 student_id = existing["id"]
+                # The files this student used to reference. Re-enrolling
+                # replaces them, so they have to be deleted afterwards or the
+                # faces/ folder keeps every photo the student ever had.
+                superseded = db.student_photo_names(conn, student_id)
                 db.update_student(
                     conn,
                     student_id,
@@ -545,8 +581,14 @@ def add_student():
 
             # The first encoding lives on the student row; the rest go to
             # student_encodings and are all compared against during a scan.
-            for extra in encodings[1:]:
-                db.add_student_encoding(conn, student_id, extra)
+            # Each one records the file it came from, so maintenance.py can
+            # tell a live reference photo apart from a leftover.
+            for extra, path in zip(encodings[1:], saved[1:]):
+                db.add_student_encoding(conn, student_id, extra, path.name)
+
+        kept = {path.name for path in saved}
+        for name_on_disk in superseded - kept:
+            (FACES_DIR / name_on_disk).unlink(missing_ok=True)
     except sqlite3.IntegrityError as exc:
         for path in saved:
             path.unlink(missing_ok=True)
@@ -562,8 +604,10 @@ def remove_student(student_id: int):
             abort(404)
         student = db.get_student(conn, student_id)
         class_id = student["class_id"] if student else None
-        if student and student["photo_path"]:
-            (FACES_DIR / student["photo_path"]).unlink(missing_ok=True)
+        # Every reference photo, not just the primary one, or the extra
+        # enrolment photos would outlive the student they belong to.
+        for name_on_disk in db.student_photo_names(conn, student_id):
+            (FACES_DIR / name_on_disk).unlink(missing_ok=True)
         db.delete_student(conn, student_id)
     flash("Student removed.", "success")
     return redirect(url_for("students_page", class_id=class_id))
@@ -720,10 +764,16 @@ def api_confirm():
     if class_id is None:
         return jsonify({"error": "Missing class."}), 400
 
-    on_date = payload.get("date") or date.today().isoformat()
-    period = str(payload.get("period") or "1")
-    taken_by = (payload.get("taken_by") or "").strip()
-    total_faces = parse_int(payload.get("total_faces"), 0)
+    on_date = clean_date(payload.get("date") or date.today().isoformat())
+    if on_date is None:
+        return jsonify({"error": "That date is not a valid YYYY-MM-DD date."}), 400
+    period = clean_period(payload.get("period"))
+    if period is None:
+        return jsonify(
+            {"error": "A period is a short label such as '1' or '2A'."}
+        ), 400
+    taken_by = (str(payload.get("taken_by") or "")).strip()[:120]
+    total_faces = max(0, parse_int(payload.get("total_faces"), 0) or 0)
 
     present: dict[int, dict] = {}
     for item in payload.get("present") or []:
@@ -769,6 +819,16 @@ def api_update_status():
             conn, tid, student_id
         ):
             return jsonify({"error": "That session no longer exists."}), 404
+        # Owning both is not enough: a teacher owns several classes, and a
+        # student from class B has no row in a session of class A. The
+        # integrity hook raises on that pair, which would surface as an HTML
+        # 500 the frontend cannot parse, so refuse it here with real JSON.
+        sess = db.get_session(conn, session_id)
+        student = db.get_student(conn, student_id)
+        if sess is None or student is None or sess["class_id"] != student["class_id"]:
+            return jsonify(
+                {"error": "That student is not on the roster for this session."}
+            ), 404
         db.set_status(conn, session_id, student_id, status)
     return jsonify({"ok": True, "student_id": student_id, "status": status})
 

@@ -11,7 +11,7 @@ source .venv/bin/activate
 python -m pip install --quiet --upgrade pip
 python -m pip install --quiet -r requirements.txt || {
   echo "Full install failed; installing the web-only dependencies. Scanning may be unavailable."
-  python -m pip install --quiet Flask==3.0.3 Werkzeug==3.0.6 openpyxl==3.1.5 numpy==1.26.4 Pillow==10.4.0 pillow-heif==0.18.0
+  python -m pip install --quiet Flask==3.1.3 Werkzeug==3.1.6 openpyxl==3.1.5 numpy==1.26.4 Pillow==12.3.0 pillow-heif==1.3.0
 }
 export OPEN_BROWSER="${OPEN_BROWSER:-1}" PORT COOKIE_SECURE="${COOKIE_SECURE:-0}" PRODUCTION=0
 if [ -z "${SECRET_KEY:-}" ]; then
