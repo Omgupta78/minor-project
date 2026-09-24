@@ -105,6 +105,11 @@
                silently overrides `multiple`, limiting the picker to a single shot.
                Gallery multi-select needs it absent. Live capture has its own button. -->
           <input type="file" id="file-input" accept="image/*,.heic,.heif" multiple class="hidden" onchange="handleFiles(this)"/>
+          <!-- The camera fallback. `capture` hands the job to the phone's own
+               camera app, which needs no secure context and no permission
+               prompt of ours. Single-shot by design: capture overrides
+               `multiple`, and the teacher taps again for the next angle. -->
+          <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden" onchange="handleFiles(this)"/>
 
           <div id="preview-wrap" class="hidden absolute inset-0 bg-slate-900 flex items-center justify-center p-2">
             <canvas id="preview-canvas"></canvas>
@@ -416,14 +421,54 @@ function setHud(text, tone) {
   el.className = "text-[10px] font-mono px-2 py-0.5 rounded border " + (tones[tone] || tones.muted);
 }
 
-/* ---------- camera ---------- */
+/* ---------- camera ----------
+   navigator.mediaDevices exists only in a secure context: https, or
+   localhost. Over plain http to a laptop on the classroom Wi-Fi -- which is
+   exactly how a phone reaches this server -- it is undefined, and reading
+   .getUserMedia off it threw a TypeError that reached the teacher as
+   "Camera error: Cannot read properties of undefined".
+
+   The fallback is not a consolation prize; on a phone it takes the better
+   photograph. A file input with `capture` opens the phone's own camera app,
+   which shoots at the full sensor -- twelve megapixels is ordinary -- while
+   getUserMedia hands back a video frame, 1280x720 unless you ask louder. In a
+   hall of 120 a back-row face spans about 16px in a 1280-wide frame and about
+   60px in a 12MP photo, and identification needs roughly 45px to work at all
+   (RECOGNITION.md). So the live viewfinder is the path worth losing. */
+function liveCameraAvailable() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function useNativeCamera() {
+  document.getElementById("camera-input").click();
+}
+
 async function openCamera() {
+  if (!liveCameraAvailable()) { useNativeCamera(); return; }
   document.getElementById("camera-modal").style.display = "flex";
   document.getElementById("cam-count").textContent = photos.length;
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    // Ask for the largest stream the camera will give. Without this the
+    // browser picks a default around 640x480, where a back row is mush.
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 3840 },
+        height: { ideal: 2160 },
+      },
+    });
     document.getElementById("camera-video").srcObject = mediaStream;
-  } catch (err) { alert("Camera error: " + err.message); closeCamera(); }
+  } catch (err) {
+    closeCamera();
+    if (err && err.name === "NotAllowedError") {
+      alert("The camera was blocked. Allow camera access for this site, or use "
+            + "Upload Photos to pick a picture you have already taken.");
+      return;
+    }
+    // Anything else -- no camera, camera busy, an older browser -- is worth
+    // one try through the phone's own camera app before giving up.
+    useNativeCamera();
+  }
 }
 function closeCamera() {
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }

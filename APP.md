@@ -38,6 +38,26 @@ Two ways round it:
 
 Or use the Android app below, which has no such restriction.
 
+### Taking the photo
+
+Over plain http — which is what `http://192.168.1.14:5000` is — the browser
+refuses `getUserMedia` outright: live camera access is allowed only from https
+or from localhost. So **Use Camera** does not open a viewfinder inside the
+page. It opens the phone's own camera app instead, and the photo comes back
+into the page when you accept it.
+
+This is the better of the two, not a workaround:
+
+| | In-page viewfinder | Phone's camera app |
+|---|---|---|
+| Resolution | ~1280×720 | the full sensor, commonly 12MP |
+| Back-row face in a hall of 120 | ~16px across | ~60px across |
+| Identified? | no — 45px is the floor | yes |
+
+The numbers are from `RECOGNITION.md`. A viewfinder frame simply does not
+carry enough pixels for the back of a lecture hall, so the fallback is what you
+want even when https is available.
+
 ### What it stores
 
 The service worker caches **stylesheets, icons and scripts only** — never a
@@ -51,8 +71,8 @@ notice rather than yesterday's register.
 ## 2. The Android app (`.apk`)
 
 A small WebView app: your server's pages, in an app shell, with the four things
-a browser tab cannot give you — a launcher icon, no address bar, camera access
-without an HTTPS certificate, and a remembered server address.
+a browser tab cannot give you — a launcher icon, no address bar, a camera that
+works over plain http, and a remembered server address.
 
 **It is about 77 KB** because it has no dependencies at all: everything it uses
 is in Android itself.
@@ -160,7 +180,7 @@ key does not belong in a public repository.
 | | Browser install | `.apk` |
 |---|---|---|
 | A file to hand in | no | **yes** |
-| Works over plain http to a laptop | no (needs HTTPS) | **yes** |
+| Works over plain http to a laptop | **yes** (install prompt needs HTTPS) | **yes** |
 | Works on iPhone | **yes** | no |
 | Install effort | one tap | allow unknown sources |
 | Updates | automatic | rebuild and reinstall |

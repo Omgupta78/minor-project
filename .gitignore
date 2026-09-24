@@ -9,7 +9,11 @@ instance/
 *.db
 *.db-wal
 *.db-shm
-attendance/
+# Anchored. Unanchored, "attendance/" matches at any depth -- including
+# android/app/src/main/java/com/faceid/attendance/, which is the package
+# directory holding every line of the Android app. It did, and the app's
+# source was silently absent from the repository while building fine locally.
+/attendance/
 uploads/
 session_photos/
 
