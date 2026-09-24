@@ -65,8 +65,14 @@ is in Android itself.
 
 ### The server address
 
-**The server prints it for you.** Start it with `HOST=0.0.0.0` and read the
-address off the terminal:
+**One command does all of it:**
+
+```bash
+./run-phone.sh          # Windows: run-phone.bat
+```
+
+That is `run.sh` bound to every network instead of this computer only, which is
+the difference the phone needs. It prints the address to type:
 
 ```
   Attendance server
