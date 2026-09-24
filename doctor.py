@@ -11,8 +11,10 @@ present, and if not, exactly why.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parent
 
@@ -57,7 +59,6 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("false-match tests present", "smalltest.py", "MATCH_MARGIN", True),
     ("accuracy harness with a threshold sweep", "accuracy.py", "def sweep", True),
     ("file picker allows multi-select", "templates/index.html", "multiple", True),
-    ("no capture attr blocking mobile multi-select", "templates/index.html", 'capture="environment"', False),
     ("thumbnail strip in the UI", "templates/index.html", "thumb-strip", True),
     ("photos are sent as a list", "templates/index.html", 'fd.append("photos"', True),
     ("offline stylesheet present", "static/app.css", "", True),
@@ -145,6 +146,43 @@ CHECKS: list[tuple[str, str, str, bool]] = [
 ]
 
 
+# Some rules are about how an attribute is used, not whether a string appears
+# anywhere in the file.
+#
+# The gallery picker must stay captureless: `capture` silently overrides
+# `multiple`, so the teacher could pick only one photo instead of the three
+# that cover a lecture hall. But the camera button needs an input that *does*
+# carry `capture`, because navigator.mediaDevices does not exist over plain
+# http and the phone's own camera app is the only way in.
+#
+# A blanket "no capture anywhere in this file" rule cannot tell those apart.
+# It read the fix for the camera as the regression it was written to catch.
+def gallery_picker_keeps_multi_select(content: str) -> bool:
+    return not any(
+        "multiple" in tag and "capture" in tag
+        for tag in re.findall(r"<input[^>]*>", content)
+    )
+
+
+def camera_has_a_plain_http_fallback(content: str) -> bool:
+    has_input = any(
+        'id="camera-input"' in tag and "capture=" in tag
+        for tag in re.findall(r"<input[^>]*>", content)
+    )
+    # And the code must actually reach for it rather than read .getUserMedia
+    # off an undefined navigator.mediaDevices.
+    return has_input and "liveCameraAvailable()" in content
+
+
+# (label, file, predicate over the file's text)
+LOGIC_CHECKS: list[tuple[str, str, Callable[[str], bool]]] = [
+    ("gallery picker keeps multi-select", "templates/index.html",
+     gallery_picker_keeps_multi_select),
+    ("camera works over plain http", "templates/index.html",
+     camera_has_a_plain_http_fallback),
+]
+
+
 def main() -> int:
     print()
     print("  FaceID Attendance - version check")
@@ -166,6 +204,19 @@ def main() -> int:
 
         found = True if needle == "" else (needle in content)
         ok = found is want
+        print(f"  [{'OK  ' if ok else 'FAIL'}] {label}")
+        if not ok:
+            failures.append(label)
+
+    for label, rel, predicate in LOGIC_CHECKS:
+        content = read(rel)
+        if content is None:
+            missing_files.append(rel)
+            print(f"  [MISSING FILE] {label}")
+            print(f"                 {rel} does not exist")
+            failures.append(label)
+            continue
+        ok = predicate(content)
         print(f"  [{'OK  ' if ok else 'FAIL'}] {label}")
         if not ok:
             failures.append(label)
