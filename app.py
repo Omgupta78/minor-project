@@ -1358,8 +1358,15 @@ if __name__ == "__main__":
         print("                          Every page works, but scanning is")
         print("                          disabled until dlib is installed.")
     if host == "0.0.0.0":
-        print("  Reachable from other devices on your network too.")
-        print("  Only do that on a network you trust.")
+        import netinfo
+
+        for phone_url in netinfo.phone_urls(port):
+            print("  In the phone app, type:  " + phone_url)
+        print("  Only expose this on a network you trust.")
+    else:
+        print("  Phones cannot reach this. For the Android app, restart with")
+        print("  HOST=0.0.0.0 (Windows: set HOST=0.0.0.0) and use the address")
+        print("  it prints.")
     print("  Press CTRL+C to stop.")
     print("")
 

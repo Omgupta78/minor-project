@@ -65,6 +65,22 @@ is in Android itself.
 
 ### The server address
 
+**The server prints it for you.** Start it with `HOST=0.0.0.0` and read the
+address off the terminal:
+
+```
+  Attendance server
+  ----------------------------------------------------
+  On this computer:  http://127.0.0.1:5000
+
+  In the phone app, type this address:
+
+      http://192.168.1.14:5000
+```
+
+If it instead says *"Phones CANNOT reach this server"*, the server is bound to
+the computer only — stop it and start it again with `HOST=0.0.0.0`.
+
 Type where the attendance server is running, for example:
 
 ```
@@ -88,6 +104,26 @@ Without `HOST=0.0.0.0` the server only answers itself, and the phone cannot
 reach it however correct the address is.
 
 If the address changes, reopen the app: the error offers **Change address**.
+
+### If it still will not connect
+
+In order of how often each one is the cause:
+
+1. **The server is bound to localhost.** It must be started with
+   `HOST=0.0.0.0`. Its startup message says which it is.
+2. **You typed `127.0.0.1` or `localhost`.** On the phone those mean the
+   phone, so nothing answers. Use the `192.168.x.x` address.
+3. **The computer's firewall.** Windows blocks incoming connections to Python
+   by default and asks once — if you dismissed that prompt, allow Python on
+   **private networks** in Windows Defender Firewall.
+4. **Different networks.** A phone on mobile data, or on a guest Wi-Fi that
+   isolates clients, cannot see the laptop. Both must be on the same Wi-Fi.
+5. **College Wi-Fi blocks device-to-device traffic.** Many campus networks do.
+   Use a phone hotspot with the laptop joined to it, or deploy to Render.
+
+To test without the app, open `http://192.168.1.14:5000/healthz` in the
+phone's browser. If that shows `{"ok": true ...}` the network is fine and the
+problem is in the app's address; if it does not, it is one of the five above.
 
 ### Build it yourself
 
