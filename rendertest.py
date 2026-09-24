@@ -60,6 +60,7 @@ with db.session_scope() as conn:
         teacher=teacher,
         max_photos_per_scan=8,
         max_enrol_photos=5,
+        build="v1.0.0 · testing",
     )
 
     cases = [

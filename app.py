@@ -276,8 +276,13 @@ def change_own_password():
 
 @app.get("/healthz")
 def healthz():
-    """Liveness probe for the hosting platform. No data, no login."""
-    return jsonify({"ok": True})
+    """Liveness probe for the hosting platform. No data, no login.
+
+    Reports the build too, so `curl /healthz` answers "is the server actually
+    running the code I just checked out?" without opening a browser, logging
+    in, or trusting a cached page.
+    """
+    return jsonify({"ok": True, "build": BUILD, "import_available": True})
 
 
 @app.context_processor
@@ -292,6 +297,7 @@ def inject_globals():
             "teacher": None,
             "max_photos_per_scan": MAX_PHOTOS_PER_SCAN,
             "max_enrol_photos": MAX_ENROL_PHOTOS,
+            "build": BUILD,
         }
     with get_db() as conn:
         classes = db.list_classes(conn, teacher_id=tid)
@@ -309,6 +315,7 @@ def inject_globals():
         # from /api/scan after the teacher had already picked the photos.
         "max_photos_per_scan": MAX_PHOTOS_PER_SCAN,
         "max_enrol_photos": MAX_ENROL_PHOTOS,
+        "build": BUILD,
     }
 
 
@@ -456,6 +463,51 @@ IMPORT_DIR = Path(os.environ.get("IMPORT_DIR", BASE_DIR / "instance" / "imports"
 # server. On a shared host it would let any teacher read any folder the
 # process can reach, so it is off unless switched on deliberately.
 ALLOW_PATH_IMPORT = os.environ.get("ALLOW_PATH_IMPORT", "1") == "1"
+
+
+def _build_marker() -> str:
+    """A short label naming exactly which build is running, for the footer.
+
+    Version plus the commit it was checked out at. Without it there is no way
+    to tell a running server apart from the one you thought you started -- and
+    since Flask does not reload with debug off, "I copied the new files but the
+    old app is still showing" is the single most common thing to go wrong.
+    Compare what the footer says with the latest commit on GitHub.
+
+    Reads .git by hand rather than shelling out to git, so it costs nothing at
+    startup and still works where git is not installed or the code was
+    unzipped rather than cloned.
+    """
+    version = "?"
+    version_file = BASE_DIR / "VERSION"
+    if version_file.exists():
+        version = version_file.read_text(encoding="utf-8", errors="replace").strip() or "?"
+
+    commit = ""
+    try:
+        head = (BASE_DIR / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref: "):
+            ref = head[5:].strip()
+            ref_file = BASE_DIR / ".git" / ref
+            if ref_file.exists():
+                commit = ref_file.read_text(encoding="utf-8").strip()
+            else:
+                # A freshly cloned repository keeps its refs packed.
+                packed = BASE_DIR / ".git" / "packed-refs"
+                if packed.exists():
+                    for line in packed.read_text(encoding="utf-8").splitlines():
+                        if line.endswith(" " + ref):
+                            commit = line.split(" ", 1)[0]
+                            break
+        else:
+            commit = head  # detached HEAD
+    except OSError:
+        pass
+
+    return f"v{version}" + (f" · {commit[:7]}" if commit else "")
+
+
+BUILD = _build_marker()
 
 
 @app.post("/add-student")
