@@ -265,6 +265,22 @@ that data first. Back up `attendance.db` before the first start, as always.
 
 ---
 
+## A teacher forgot their password
+
+There is no email server, so there is no reset link. Recovery is done on the
+machine holding the database:
+
+```bash
+python reset_password.py --list                    # which accounts exist
+python reset_password.py --email you@college.edu   # prompts for a new one
+```
+
+Old passwords cannot be recovered -- they are stored as PBKDF2 hashes, which
+is the point. The tool sets a new one. It grants no access that whoever runs
+it does not already have, since the database file is sitting right there.
+
+If the account was deactivated, add `--activate`.
+
 ## Operating checklist
 
 | Task | Command or setting |
