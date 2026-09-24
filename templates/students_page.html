@@ -66,7 +66,7 @@
                      onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'material-symbols-outlined text-txt-f text-[20px]',textContent:'person'}))"/>
               </div>
             </td>
-            <td class="px-4 py-2.5 font-mono text-xs text-txt-m">{{ s.roll_no }}</td>
+            <td class="px-4 py-2.5 font-mono text-xs text-txt-m">{{ s.roll_no }}{% if s.has_encoding %}{% set refs = (references or {}).get(s.id, 1) %}{% if refs < 2 %}<span class="text-warn" title="Enrolled from a single photo. Re-enrol with three - front on, turned slightly left, slightly right - to be recognised more often from the back of the room."> · 1 photo</span>{% else %}<span class="text-txt-f"> · {{ refs }} photos</span>{% endif %}{% endif %}</td>
             <td class="px-4 py-2.5 font-medium text-txt">{{ s.name }}</td>
             <td class="px-4 py-2.5 text-xs text-txt-m">{{ s.class_name or '—' }}</td>
             <td class="px-4 py-2.5 text-center">
