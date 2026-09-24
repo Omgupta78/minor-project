@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Plain http is allowed on purpose.
+
+  The normal way to run this is a laptop on the classroom Wi-Fi serving
+  http://192.168.x.x:5000. There is no certificate for a private IP address and
+  no way to get one, so refusing cleartext would make the ordinary setup
+  impossible. A hosted deployment still gets HTTPS, because the address is
+  https:// and Android uses TLS when the scheme says so.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -3,7 +3,18 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
-<meta name="theme-color" content="#f5f8fd"/>
+<meta name="theme-color" content="#2463eb"/>
+<link rel="manifest" href="/manifest.webmanifest"/>
+<link rel="icon" href="/static/icons/favicon-32.png" sizes="32x32"/>
+<link rel="icon" href="/static/icons/icon-192.png" sizes="192x192"/>
+<!-- iOS ignores the manifest, so installing to the home screen there needs
+     its own tags: without these the app opens in Safari with its address bar
+     still showing, which is the thing an installed app is meant to lose. -->
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="Attendance"/>
 <title>FaceID Attendance | {% block title %}Dashboard{% endblock %}</title>
 <meta name="description" content="Face recognition classroom attendance system"/>
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"/>
@@ -11,7 +22,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}"/>
 <script src="{{ url_for('static', filename='icons.js') }}" defer></script>
 <style>
-body{background:#f5f8fd;color:#10204a}.blink{animation:blink 1s step-end infinite}@keyframes blink{50%{opacity:0}}.fade-in{animation:fadeIn .3s ease}@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}.spinner{width:18px;height:18px;border:2px solid #dbe7fb;border-top-color:#2463eb;border-radius:50%;animation:spin .6s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#dce3ef;border-radius:3px}.review-chip{font-size:10px;padding:3px 8px;border-radius:999px;border:1px solid #E0E7EF;background:#fff;color:#5A6B8C;display:inline-flex;gap:4px;align-items:center;transition:all .15s}.review-chip:hover{border-color:#2463eb;color:#2463eb}.review-chip.is-active{background:#2463eb;border-color:#2463eb;color:#fff}#camera-modal,#add-student-modal,#add-class-modal{display:none}#preview-canvas{max-width:100%;max-height:100%;object-fit:contain;display:block}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+body{background:#f5f8fd;color:#10204a}.blink{animation:blink 1s step-end infinite}@keyframes blink{50%{opacity:0}}.fade-in{animation:fadeIn .3s ease}@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}.spinner{width:18px;height:18px;border:2px solid #dbe7fb;border-top-color:#2463eb;border-radius:50%;animation:spin .6s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#dce3ef;border-radius:3px}.review-chip{font-size:10px;padding:3px 8px;border-radius:999px;border:1px solid #E0E7EF;background:#fff;color:#5A6B8C;display:inline-flex;gap:4px;align-items:center;transition:all .15s}.review-chip:hover{border-color:#2463eb;color:#2463eb}.review-chip.is-active{background:#2463eb;border-color:#2463eb;color:#fff}#install-bar{position:fixed;left:12px;right:12px;bottom:84px;z-index:300;display:flex;align-items:center;gap:10px;background:#10204a;color:#fff;border-radius:12px;padding:11px 14px;font-size:12px;box-shadow:0 10px 32px rgba(16,32,74,.28)}#install-bar span{flex:1;line-height:1.35}#install-bar button{background:#2463eb;color:#fff;border:0;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer}#install-bar button[data-dismiss]{background:transparent;color:#9ba7ba;font-size:17px;padding:2px 6px}@media(display-mode:standalone){ #install-bar{display:none}}#camera-modal,#add-student-modal,#add-class-modal{display:none}#preview-canvas{max-width:100%;max-height:100%;object-fit:contain;display:block}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style>
 {% block extra_head %}{% endblock %}
 </head>
@@ -43,6 +54,71 @@ body{background:#f5f8fd;color:#10204a}.blink{animation:blink 1s step-end infinit
 {% if teacher %}<div id="mobile-account-sheet" class="fixed inset-0 bg-black/40 z-[200] items-end justify-center backdrop-blur-sm" style="display:none" onclick="if(event.target===this)this.style.display='none'"><div class="bg-white w-full max-w-md rounded-t-3xl p-5 shadow-2xl"><div class="w-10 h-1 rounded-full bg-bdr mx-auto mb-5"></div><div class="flex items-center gap-3 pb-4 border-b border-bdr"><span class="app-avatar w-12 h-12"><span class="material-symbols-outlined">face</span></span><div class="min-w-0"><div class="font-bold text-txt truncate">{{ teacher.name }}</div><div class="text-xs text-txt-m truncate">{{ teacher.email }}</div></div></div><a href="/students_page" class="flex items-center gap-3 py-4 border-b border-bdr"><span class="material-symbols-outlined text-primary">group_add</span><span class="text-sm font-semibold">Manage students</span><span class="material-symbols-outlined text-txt-f ml-auto">chevron_right</span></a><a href="/records" class="flex items-center gap-3 py-4 border-b border-bdr"><span class="material-symbols-outlined text-primary">download</span><span class="text-sm font-semibold">Reports and exports</span><span class="material-symbols-outlined text-txt-f ml-auto">chevron_right</span></a><form method="post" action="/logout" class="pt-4"><button type="submit" class="w-full bg-danger-light text-danger font-semibold py-3 rounded-xl">Log out</button></form></div></div>{% endif %}
 {% block modals %}{% endblock %}
 <footer class="bg-white border-t border-bdr px-5 py-2.5 flex flex-wrap justify-between items-center gap-2"><div class="font-mono text-[11px] text-txt-m flex items-center gap-1.5"><span class="text-success">●</span><span id="console-text">ready</span></div><div class="flex items-center gap-2 font-mono text-[9px] text-txt-f uppercase tracking-wider"><span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr" title="Which build is running. Compare it with the latest commit on GitHub.">{{ build|default('dev') }}</span><span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">match ≤ {{ '%.2f'|format(match_threshold) }}</span><span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">dlib</span><span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">flask</span><span class="bg-surface-el px-1.5 py-0.5 rounded border border-bdr">sqlite</span></div></footer>
-<script>const avatarColors=['#3B82F6','#8B5CF6','#EC4899','#F97316','#14B8A6','#EF4444','#6366F1','#10B981'];document.addEventListener('DOMContentLoaded',()=>{const clock=document.getElementById('live-clock');if(clock){const tick=()=>clock.textContent=new Date().toLocaleTimeString('en-IN',{hour12:false});tick();setInterval(tick,1000);}});function setConsole(msg){const el=document.getElementById('console-text');if(el)el.textContent=msg}function initials(name){return name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase()}function pct(v){return Math.round((v||0)*100)+'%'}</script>
+<script>
+/* Installability. The browser decides when an app may be installed and fires
+   beforeinstallprompt at that moment; the prompt can only be shown from a real
+   user gesture afterwards, so the event is saved and a button revealed.
+   iOS fires nothing at all, so there it is a short instruction instead. */
+(function () {
+  "use strict";
+  var deferred = null;
+  var bar = null;
+
+  function ios() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+  }
+  function installed() {
+    return window.matchMedia("(display-mode: standalone)").matches ||
+           window.navigator.standalone === true;
+  }
+  function show(html, onClick) {
+    if (installed() || document.getElementById("install-bar")) return;
+    bar = document.createElement("div");
+    bar.id = "install-bar";
+    bar.innerHTML = html;
+    document.body.appendChild(bar);
+    var act = bar.querySelector("[data-install]");
+    if (act && onClick) act.addEventListener("click", onClick);
+    var dismiss = bar.querySelector("[data-dismiss]");
+    if (dismiss) dismiss.addEventListener("click", function () {
+      bar.remove();
+      try { localStorage.setItem("install-dismissed", "1"); } catch (e) {}
+    });
+  }
+  var dismissed = false;
+  try { dismissed = localStorage.getItem("install-dismissed") === "1"; } catch (e) {}
+
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault();
+    deferred = e;
+    if (dismissed) return;
+    show('<span>Install Attendance for full-screen access</span>' +
+         '<button data-install type="button">Install</button>' +
+         '<button data-dismiss type="button" aria-label="Not now">\u00d7</button>',
+      function () {
+        if (!deferred) return;
+        deferred.prompt();
+        deferred.userChoice.then(function () { deferred = null; if (bar) bar.remove(); });
+      });
+  });
+
+  window.addEventListener("appinstalled", function () { if (bar) bar.remove(); });
+
+  document.addEventListener("DOMContentLoaded", function () {
+    if (ios() && !installed() && !dismissed) {
+      show('<span>Install: tap Share, then <b>Add to Home Screen</b></span>' +
+           '<button data-dismiss type="button" aria-label="Not now">\u00d7</button>');
+    }
+  });
+
+  /* The worker only ever caches stylesheets, icons and scripts -- never a page
+     and never an API response. See static/sw.js for why. */
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () {});
+    });
+  }
+})();
+const avatarColors=['#3B82F6','#8B5CF6','#EC4899','#F97316','#14B8A6','#EF4444','#6366F1','#10B981'];document.addEventListener('DOMContentLoaded',()=>{const clock=document.getElementById('live-clock');if(clock){const tick=()=>clock.textContent=new Date().toLocaleTimeString('en-IN',{hour12:false});tick();setInterval(tick,1000);}});function setConsole(msg){const el=document.getElementById('console-text');if(el)el.textContent=msg}function initials(name){return name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase()}function pct(v){return Math.round((v||0)*100)+'%'}</script>
 {% block scripts %}{% endblock %}
 </body></html>

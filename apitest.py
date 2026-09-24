@@ -136,7 +136,51 @@ check(
     other.get(f"/records/{session_id}").status_code == 404,
 )
 
-print("\n6. maintenance keeps enrolled photos and removes only strays")
+print("\n6. the app installs: manifest, worker and offline page")
+anon = flask_app.app.test_client()          # nobody signed in
+for path, label in (
+    ("/manifest.webmanifest", "the manifest"),
+    ("/sw.js", "the service worker"),
+    ("/offline", "the offline page"),
+    ("/favicon.ico", "the favicon"),
+):
+    # These are fetched before anyone logs in. Redirecting them to the login
+    # page makes the install prompt silently never appear.
+    check(f"{label} is served without signing in", anon.get(path).status_code == 200,
+          f"got {anon.get(path).status_code}")
+
+manifest_body = anon.get("/manifest.webmanifest")
+import json as _json
+parsed = _json.loads(manifest_body.get_data(as_text=True))
+check("the manifest is valid JSON with a name and icons",
+      parsed.get("name") and len(parsed.get("icons", [])) >= 2, str(parsed)[:80])
+check("it asks to open full-screen", parsed.get("display") == "standalone",
+      str(parsed.get("display")))
+check("its icons exist", all(anon.get(i["src"]).status_code == 200 for i in parsed["icons"]))
+check("it is served as a manifest, not as plain text",
+      "manifest" in manifest_body.headers.get("Content-Type", ""),
+      manifest_body.headers.get("Content-Type"))
+
+worker = anon.get("/sw.js")
+body = worker.get_data(as_text=True)
+check("the worker may control the whole app, not just /static",
+      worker.headers.get("Service-Worker-Allowed") == "/",
+      worker.headers.get("Service-Worker-Allowed"))
+check("the build is substituted into the cache name, so a deploy invalidates it",
+      "__BUILD__" not in body and flask_app.BUILD.split(" ")[0] in body)
+check("the worker refuses to cache pages or API responses",
+      'request.mode === "navigate"' in body and "/api/" not in body.split("SHELL")[1][:400],
+      "a cached roster would leak between teachers on a shared phone")
+
+for page in ("/login", "/signup"):
+    html = anon.get(page).get_data(as_text=True)
+    check(f"{page} links the manifest (it is the first page a new install sees)",
+          "/manifest.webmanifest" in html)
+    check(f"{page} carries the iOS home-screen tags",
+          "apple-mobile-web-app-capable" in html)
+
+
+print("\n7. maintenance keeps enrolled photos and removes only strays")
 import maintenance
 
 faces = Path(os.environ["FACES_DIR"])

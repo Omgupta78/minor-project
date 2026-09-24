@@ -1,0 +1,40 @@
+name: build apk
+
+# Builds the installable Android app. Runs on demand and on a tag, not on
+# every push: the web app's own tests are the fast feedback loop, and nobody
+# needs a new APK for a change to a docstring.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build the APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug assembleRelease
+      - name: Check it is a real, signed APK
+        working-directory: android
+        run: |
+          SDK="$ANDROID_HOME/build-tools/34.0.0"
+          "$SDK/aapt" dump badging app/build/outputs/apk/release/app-release.apk | head -3
+          "$SDK/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
+      - name: Upload it
+        uses: actions/upload-artifact@v4
+        with:
+          name: faceid-attendance-apk
+          path: android/app/build/outputs/apk/*/*.apk
+          if-no-files-found: error
