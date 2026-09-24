@@ -68,6 +68,8 @@ with db.session_scope() as conn:
         ("students_page.html", dict(base, active_page="students", students=students,
                                     summary={s["id"]: s for s in summary},
                                     references=db.encoding_counts(conn, cid))),
+        ("import_page.html", dict(base, active_page="students",
+                                  allow_path_import=True, max_enrol_photos=5)),
         ("records.html", dict(base, active_page="records", sessions=sessions,
                               summary=summary, stats=stats,
                               start="2026-08-01", end="2026-09-09")),
@@ -153,7 +155,8 @@ import re, shutil, subprocess, tempfile
 node = shutil.which("node")
 if node:
     checked = 0
-    for name in ("index.html", "session_detail.html", "records.html", "students_page.html"):
+    for name in ("index.html", "session_detail.html", "records.html",
+                 "students_page.html", "import_page.html"):
         page = (RENDER_DIR / name).read_text()
         for i, block in enumerate(re.findall(r"<script>(.*?)</script>", page, re.S)):
             if not block.strip():

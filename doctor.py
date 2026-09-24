@@ -99,6 +99,18 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("120-student capacity test", "halltest.py", "STUDENTS = 120", True),
     ("hall benchmark harness", "hallbench.py", "def face_px_at", True),
     ("measured results written down", "RECOGNITION.md", "face width", True),
+    # --- bulk enrolment ---
+    ("bulk roster importer", "roster_import.py", "def build_plan", True),
+    ("csv manifest supported", "roster_import.py", "def read_manifest", True),
+    ("folder-per-student supported", "roster_import.py", "def read_folders", True),
+    ("zip slip is refused", "roster_import.py", "outside the folder", True),
+    ("import page present", "templates/import_page.html", "imp-preview", True),
+    ("import runs in the background", "app.py", "def _run_import", True),
+    ("import progress is pollable", "app.py", "def api_import_status", True),
+    ("manual one-by-one enrolment retained", "app.py", "def add_student", True),
+    ("import command line tool", "import_students.py", "--dry-run", True),
+    ("import tests present", "importtest.py", "zip slip", False),
+    ("import formats documented", "IMPORT.md", "roll_no", True),
 ]
 
 

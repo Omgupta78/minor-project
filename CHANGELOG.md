@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased — bulk enrolment from a folder, a zip or a spreadsheet
+
+Adding 120 students one form at a time is not a workflow. A whole roster can
+now be enrolled at once from the folder a department already keeps. Adding a
+single student by hand is unchanged.
+
+### Added
+- `roster_import.py` — reads a roster in whichever of three layouts it finds:
+  a CSV/TSV manifest, one folder per student, or flat `<roll>_<name>.jpg`
+  files. Column headings are matched loosely so an existing spreadsheet
+  exports straight from Google Sheets.
+- **Students → Import a class**: pick a folder, upload a zip (what Drive gives
+  you when you download a folder) or give a path on the machine. A preview
+  reports exactly who was recognised and why anyone was skipped, and changes
+  nothing.
+- The import runs as a background job with a progress bar, because encoding
+  120 students takes minutes and a request should not. Progress lives in
+  `import_jobs` so it survives being polled by a different worker.
+- `import_students.py` — the same import from a terminal, with `--dry-run`.
+  This is the no-timeout path for a first big roster.
+- `IMPORT.md` — the naming rules, the CSV format, the photo requirements and
+  the Google Drive workflow.
+- `importtest.py` — name parsing, layout detection, spreadsheet quirks
+  (BOM, quoted commas, odd headings), and hostile zips.
+
+### Refused, deliberately
+- A zip that writes outside its own folder (zip slip), contains symlinks, or
+  expands past `IMPORT_MAX_UNPACKED_MB` / `IMPORT_MAX_FILES`.
+- A student with no usable photo: a row with no encoding would be marked
+  absent every session for the rest of the term, so they are reported instead.
+- Camera filenames. `IMG_2831.jpg` parses to roll `IMG`, name `2831`; a name
+  with no letters in it is reported rather than enrolled.
+- Two roll numbers differing only in case are flagged, never merged.
+- Direct Google Drive API access. A Drive folder reachable by link is a folder
+  of students' faces reachable by link; the documented route keeps it private.
+
+### Changed
+- `db.connect` sets `busy_timeout`, and a bulk import commits per student
+  rather than holding one transaction for the whole class. Without both, the
+  progress the teacher is watching locked the database against the import
+  writing to it.
+- The Students page links to the importer and no longer claims one photo per
+  student is all the system needs.
+
 ## Unreleased — 120-student hall capacity
 
 Measured against a 4000x3000 photograph of 120 real people in six rows, front

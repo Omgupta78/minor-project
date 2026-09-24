@@ -20,7 +20,10 @@ from __future__ import annotations
 import base64
 import os
 import re
+import shutil
 import sqlite3
+import tempfile
+import threading
 from datetime import date, datetime
 from pathlib import Path
 
@@ -45,6 +48,7 @@ import auth
 import db
 import excel_report
 import recognition
+import roster_import
 
 BASE_DIR = Path(__file__).resolve().parent
 FACES_DIR = Path(os.environ.get("FACES_DIR", BASE_DIR / "faces"))
@@ -443,6 +447,16 @@ def add_class():
 # available: one photo only ever captures one angle and one lighting setup.
 MAX_ENROL_PHOTOS = int(os.environ.get("MAX_ENROL_PHOTOS", "5"))
 
+# Where an in-progress bulk import keeps its uploaded files. Outside the
+# faces folder, because nothing here is a reference photo until it has passed
+# the quality check.
+IMPORT_DIR = Path(os.environ.get("IMPORT_DIR", BASE_DIR / "instance" / "imports"))
+# Importing from a path on the server is for a machine where the teacher and
+# the app are the same person -- a laptop, or a Drive folder synced onto the
+# server. On a shared host it would let any teacher read any folder the
+# process can reach, so it is off unless switched on deliberately.
+ALLOW_PATH_IMPORT = os.environ.get("ALLOW_PATH_IMPORT", "1") == "1"
+
 
 @app.post("/add-student")
 def add_student():
@@ -600,6 +614,240 @@ def add_student():
         flash(f"Could not save student: {exc}", "error")
 
     return redirect(url_for("students_page", class_id=class_id))
+
+
+# --------------------------------------------------------- bulk enrolment
+def _materialise(workdir: Path) -> Path:
+    """Turn whatever the import form sent into a folder on disk.
+
+    Three ways in, one result, so the parser and the enroller never need to
+    know which was used:
+
+      * a .zip -- what Google Drive gives you when you download a folder;
+      * a folder picked in the browser, which arrives as many files plus the
+        relative path of each, because a browser sends only base names;
+      * a path on this machine, for a laptop or a synced Drive folder.
+    """
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    archive = request.files.get("archive")
+    if archive and archive.filename:
+        saved = workdir / secure_filename(archive.filename)
+        archive.save(saved)
+        return roster_import.unpack(saved, workdir)
+
+    uploads = [f for f in request.files.getlist("files") if f and f.filename]
+    if uploads:
+        # The browser sends file.name, not file.webkitRelativePath, so the
+        # page sends the relative paths alongside in the same order.
+        relatives = request.form.getlist("paths")
+        root = (workdir / "picked").resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        for index, upload in enumerate(uploads):
+            raw = relatives[index] if index < len(relatives) else upload.filename
+            parts = [
+                secure_filename(part)
+                for part in str(raw).replace("\\", "/").split("/")
+                if part not in ("", ".", "..")
+            ]
+            if not parts:
+                continue
+            target = (root / Path(*parts)).resolve()
+            # Never write outside the working folder, whatever the page sent.
+            if not target.is_relative_to(root):
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            upload.save(target)
+        entries = [p for p in root.iterdir()]
+        if len(entries) == 1 and entries[0].is_dir():
+            return entries[0]
+        return root
+
+    given = (request.form.get("server_path") or "").strip()
+    if given:
+        if not ALLOW_PATH_IMPORT:
+            raise roster_import.ImportError_(
+                "Importing from a path on the server is switched off here. "
+                "Upload a zip or pick the folder instead."
+            )
+        return roster_import.unpack(given, workdir)
+
+    raise roster_import.ImportError_(
+        "Choose a folder, a zip file, or give a path on this machine."
+    )
+
+
+def _run_import(job_id: int, class_id: int, root: str, workdir: str,
+                replace: bool) -> None:
+    """The background half of a bulk import. No request, no session.
+
+    Runs in a thread, so it must not touch anything request-scoped and must
+    open its own database connection. Progress goes into import_jobs, which
+    the page polls, so it survives being served by a different worker.
+    """
+    try:
+        plan = roster_import.build_plan(root)
+
+        def progress(done: int, total: int, roll: str) -> None:
+            # Progress is a nicety; never let it end an import that is working.
+            try:
+                with db.session_scope() as conn:
+                    db.update_import_job(
+                        conn, job_id, done=done, total=total, current=roll
+                    )
+            except Exception:
+                pass
+
+        # Deliberately two scopes. Writing the total inside the enrolment scope
+        # would open a transaction that stays open for the whole import, and
+        # the progress writes -- which use their own connection so the page can
+        # read them -- would be locked out for minutes.
+        with db.session_scope() as conn:
+            db.update_import_job(conn, job_id, total=len(plan.usable))
+
+        with db.session_scope() as conn:
+            result = roster_import.enrol(
+                plan, conn, class_id, FACES_DIR,
+                replace=replace, max_photos=MAX_ENROL_PHOTOS, on_progress=progress,
+            )
+
+        skipped = [
+            f"{c.roll_no or '?'} {c.name}: {'; '.join(c.problems)}".strip()
+            for c in plan.rejected
+        ]
+        with db.session_scope() as conn:
+            db.update_import_job(
+                conn, job_id, state="done", done=len(plan.usable),
+                current="", added=result.added, updated=result.updated,
+                failed=result.failed + len(plan.rejected),
+                photos_used=result.photos_used,
+                photos_rejected=result.photos_rejected,
+                message=f"{result.added} added, {result.updated} updated",
+                log="\n".join(skipped + result.messages)[:20000],
+                finished_at=datetime.now().isoformat(timespec="seconds"),
+            )
+    except Exception as exc:
+        # The teacher gets the message on the page; the full stack goes to the
+        # server log, because a bulk import touches the filesystem and a dozen
+        # photo formats and "it failed" is not enough to fix anything.
+        app.logger.exception("bulk import %s failed", job_id)
+        with db.session_scope() as conn:
+            db.update_import_job(
+                conn, job_id, state="failed", message=str(exc)[:500],
+                finished_at=datetime.now().isoformat(timespec="seconds"),
+            )
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+@app.get("/students/import")
+def import_page():
+    tid = teacher_id()
+    class_id = parse_int(request.args.get("class_id"))
+    with get_db() as conn:
+        classes = db.list_classes(conn, teacher_id=tid)
+        if class_id is not None and not auth.owns_class(conn, tid, class_id):
+            abort(404)
+    return render_template(
+        "import_page.html",
+        active_page="students",
+        classes=classes,
+        class_id=class_id or (classes[0]["id"] if classes else None),
+        allow_path_import=ALLOW_PATH_IMPORT,
+        max_enrol_photos=MAX_ENROL_PHOTOS,
+    )
+
+
+@app.post("/api/import/preview")
+def api_import_preview():
+    """Read the roster and report what would happen. Changes nothing."""
+    class_id = parse_int(request.form.get("class_id"))
+    with get_db() as conn:
+        if class_id is None or not auth.owns_class(conn, teacher_id(), class_id):
+            return jsonify({"error": "Choose one of your classes first."}), 404
+
+    workdir = Path(tempfile.mkdtemp(prefix="preview-", dir=_import_root()))
+    try:
+        root = _materialise(workdir)
+        plan = roster_import.build_plan(root)
+        return jsonify({
+            "layout": plan.layout,
+            "notes": plan.notes,
+            "ready": [
+                {"roll_no": c.roll_no, "name": c.name, "photos": len(c.photos)}
+                for c in plan.usable
+            ],
+            "skipped": [
+                {"roll_no": c.roll_no, "name": c.name,
+                 "problems": c.problems}
+                for c in plan.rejected
+            ],
+            "ignored": [{"name": n, "why": w} for n, w in plan.ignored[:50]],
+            "photo_count": plan.photo_count,
+        })
+    except roster_import.ImportError_ as exc:
+        return jsonify({"error": str(exc)}), 400
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+@app.post("/api/import/start")
+def api_import_start():
+    """Begin a bulk import in the background. Returns a job id to poll."""
+    tid = teacher_id()
+    class_id = parse_int(request.form.get("class_id"))
+    replace = request.form.get("replace", "1") == "1"
+    with get_db() as conn:
+        if class_id is None or not auth.owns_class(conn, tid, class_id):
+            return jsonify({"error": "Choose one of your classes first."}), 404
+
+    try:
+        recognition.ensure_available()
+    except recognition.RecognitionUnavailable as exc:
+        return jsonify({"error": str(exc)}), 503
+
+    # Kept until the job finishes, so it must not be a with-block temp dir.
+    workdir = Path(tempfile.mkdtemp(prefix="import-", dir=_import_root()))
+    try:
+        root = _materialise(workdir)
+        plan = roster_import.build_plan(root)
+    except roster_import.ImportError_ as exc:
+        shutil.rmtree(workdir, ignore_errors=True)
+        return jsonify({"error": str(exc)}), 400
+    if not plan.usable:
+        shutil.rmtree(workdir, ignore_errors=True)
+        return jsonify(
+            {"error": "No student in that folder could be read. "
+                      "Check the naming rules on this page."}
+        ), 400
+
+    with db.session_scope() as conn:
+        job_id = db.create_import_job(conn, tid, class_id, len(plan.usable))
+
+    thread = threading.Thread(
+        target=_run_import,
+        args=(job_id, class_id, str(root), str(workdir), replace),
+        daemon=True,
+        name=f"import-{job_id}",
+    )
+    thread.start()
+    return jsonify({"job_id": job_id, "total": len(plan.usable)})
+
+
+@app.get("/api/import/<int:job_id>")
+def api_import_status(job_id: int):
+    with get_db() as conn:
+        job = db.get_import_job(conn, job_id, teacher_id=teacher_id())
+    if job is None:
+        return jsonify({"error": "No such import."}), 404
+    payload = dict(job)
+    payload["log"] = [line for line in (job["log"] or "").split("\n") if line]
+    return jsonify(payload)
+
+
+def _import_root() -> Path:
+    IMPORT_DIR.mkdir(parents=True, exist_ok=True)
+    return IMPORT_DIR
 
 
 @app.post("/students/<int:student_id>/delete")

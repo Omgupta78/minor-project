@@ -98,6 +98,29 @@ CREATE TABLE IF NOT EXISTS attendance (
     UNIQUE (session_id, student_id)
 );
 
+-- Bulk enrolment of a whole class takes minutes, which is longer than a web
+-- request should live, so it runs in the background and reports progress
+-- through this table. In the database rather than in memory so the progress
+-- page can be served by a different worker than the one doing the work.
+CREATE TABLE IF NOT EXISTS import_jobs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    teacher_id      INTEGER NOT NULL,
+    class_id        INTEGER NOT NULL,
+    state           TEXT    NOT NULL DEFAULT 'running',
+    total           INTEGER NOT NULL DEFAULT 0,
+    done            INTEGER NOT NULL DEFAULT 0,
+    current         TEXT    NOT NULL DEFAULT '',
+    added           INTEGER NOT NULL DEFAULT 0,
+    updated         INTEGER NOT NULL DEFAULT 0,
+    failed          INTEGER NOT NULL DEFAULT 0,
+    photos_used     INTEGER NOT NULL DEFAULT 0,
+    photos_rejected INTEGER NOT NULL DEFAULT 0,
+    message         TEXT    NOT NULL DEFAULT '',
+    log             TEXT    NOT NULL DEFAULT '',
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    finished_at     TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_students_class   ON students (class_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_class   ON sessions (class_id, date);
 CREATE INDEX IF NOT EXISTS idx_attendance_sess  ON attendance (session_id);
@@ -115,6 +138,10 @@ def connect(db_path: Optional[os.PathLike | str] = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # A bulk import writes from a background thread while the progress page
+    # reads from the request thread. Without this, the reader raises "database
+    # is locked" the moment the two overlap instead of waiting its turn.
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -746,6 +773,42 @@ def dashboard_stats(
         "avg_percent": avg,
         "defaulters": sum(1 for s in summary if s["defaulter"]),
     }
+
+
+# ---------------------------------------------------------------- import jobs
+def create_import_job(conn, teacher_id: int, class_id: int, total: int) -> int:
+    cur = conn.execute(
+        """INSERT INTO import_jobs (teacher_id, class_id, total, state)
+           VALUES (?, ?, ?, 'running')""",
+        (teacher_id, class_id, total),
+    )
+    return int(cur.lastrowid)
+
+
+def update_import_job(conn, job_id: int, **fields) -> None:
+    allowed = {
+        "state", "total", "done", "current", "added", "updated", "failed",
+        "photos_used", "photos_rejected", "message", "log", "finished_at",
+    }
+    sets, params = [], []
+    for key, value in fields.items():
+        if key not in allowed:
+            raise ValueError(f"unknown import job field: {key}")
+        sets.append(f"{key} = ?")
+        params.append(value)
+    if not sets:
+        return
+    params.append(job_id)
+    conn.execute(f"UPDATE import_jobs SET {', '.join(sets)} WHERE id = ?", params)
+
+
+def get_import_job(conn, job_id: int, teacher_id: Optional[int] = None):
+    sql = "SELECT * FROM import_jobs WHERE id = ?"
+    params: list = [job_id]
+    if teacher_id is not None:
+        sql += " AND teacher_id = ?"
+        params.append(teacher_id)
+    return conn.execute(sql, params).fetchone()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}Import a class{% endblock %}
+{% block mobile_title %}Import a class{% endblock %}
+{% block mobile_subtitle %}Enrol a whole roster at once{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto flex flex-col gap-4">
+
+  <div class="bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
+    <div class="px-4 py-3 border-b border-bdr bg-surface-el flex items-center gap-2">
+      <span class="material-symbols-outlined text-primary text-[18px]">drive_folder_upload</span>
+      <h2 class="font-semibold text-txt text-sm">Import a whole class</h2>
+    </div>
+
+    <div class="p-4 flex flex-col gap-4">
+      <div>
+        <label for="imp-class" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Enrol into</label>
+        <select id="imp-class" class="w-full border-bdr rounded-lg px-3 py-2 text-sm focus:ring-primary focus:border-primary">
+          {% for c in classes %}
+          <option value="{{ c.id }}" {{ 'selected' if c.id == class_id }}>{{ c.name }}{% if c.subject %} · {{ c.subject }}{% endif %}</option>
+          {% endfor %}
+        </select>
+        {% if not classes %}
+        <p class="text-[11px] text-warn mt-1">Create a class on the Students page first.</p>
+        {% endif %}
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <span class="block text-xs font-semibold text-txt-m uppercase tracking-wider">Where is the roster?</span>
+
+        <label class="border border-bdr rounded-lg p-3 flex items-start gap-3 cursor-pointer hover:border-primary transition-colors">
+          <span class="material-symbols-outlined text-primary text-[20px] mt-0.5">folder_open</span>
+          <span class="min-w-0 flex-1">
+            <span class="block text-sm font-medium text-txt">Pick a folder</span>
+            <span class="block text-[11px] text-txt-m">The whole folder is read, sub-folders and all. Nothing leaves this server.</span>
+            <input id="imp-folder" type="file" webkitdirectory directory multiple class="mt-2 w-full text-xs text-txt-m file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-primary-light file:text-primary cursor-pointer"/>
+          </span>
+        </label>
+
+        <label class="border border-bdr rounded-lg p-3 flex items-start gap-3 cursor-pointer hover:border-primary transition-colors">
+          <span class="material-symbols-outlined text-primary text-[20px] mt-0.5">folder_zip</span>
+          <span class="min-w-0 flex-1">
+            <span class="block text-sm font-medium text-txt">Upload a .zip</span>
+            <span class="block text-[11px] text-txt-m">Google Drive gives you a zip when you download a folder. Upload it as it is.</span>
+            <input id="imp-zip" type="file" accept=".zip,application/zip" class="mt-2 w-full text-xs text-txt-m file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-primary-light file:text-primary cursor-pointer"/>
+          </span>
+        </label>
+
+        {% if allow_path_import %}
+        <label class="border border-bdr rounded-lg p-3 flex items-start gap-3">
+          <span class="material-symbols-outlined text-primary text-[20px] mt-0.5">terminal</span>
+          <span class="min-w-0 flex-1">
+            <span class="block text-sm font-medium text-txt">A folder on this machine</span>
+            <span class="block text-[11px] text-txt-m">For a Drive folder synced with Drive&nbsp;for&nbsp;Desktop, or a local folder.</span>
+            <input id="imp-path" type="text" placeholder="/home/you/Google Drive/CSE 3rd Year A" class="mt-2 w-full border-bdr rounded-lg px-3 py-2 text-xs font-mono focus:ring-primary focus:border-primary"/>
+          </span>
+        </label>
+        {% endif %}
+      </div>
+
+      <label class="flex items-center gap-2 text-xs text-txt-m">
+        <input id="imp-replace" type="checkbox" checked class="rounded border-bdr text-primary focus:ring-primary"/>
+        Replace the photos of students who are already enrolled
+      </label>
+
+      <div class="flex gap-2">
+        <button type="button" id="imp-preview" onclick="preview()" class="flex-1 border border-primary/40 bg-primary-light text-primary font-semibold text-sm rounded-lg py-2.5 hover:bg-blue-100 transition-colors">
+          Check the folder first
+        </button>
+        <button type="button" id="imp-start" onclick="start()" class="flex-1 bg-primary hover:bg-blue-700 text-white font-semibold text-sm rounded-lg py-2.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+          Import
+        </button>
+      </div>
+      <p class="text-[11px] text-txt-f">Nothing is enrolled until you press Import. Checking first is free and changes nothing.</p>
+    </div>
+  </div>
+
+  <div id="imp-result" class="hidden bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
+    <div class="px-4 py-3 border-b border-bdr bg-surface-el text-sm font-semibold text-txt" id="imp-result-title">Preview</div>
+    <div id="imp-progress" class="hidden px-4 py-3 border-b border-bdr">
+      <div class="flex justify-between text-xs text-txt-m mb-1.5">
+        <span id="imp-progress-text">Starting…</span>
+        <span class="font-mono" id="imp-progress-count">0 / 0</span>
+      </div>
+      <div class="h-2 rounded-full bg-surface-el overflow-hidden">
+        <div id="imp-progress-bar" class="h-full bg-primary transition-all" style="width:0%"></div>
+      </div>
+      <p class="text-[11px] text-txt-f mt-1.5">Each photo takes about a second to encode. You can leave this page open.</p>
+    </div>
+    <div id="imp-body" class="p-4 text-sm"></div>
+  </div>
+
+  <div class="bg-white rounded-xl border border-bdr shadow-sm overflow-hidden">
+    <div class="px-4 py-3 border-b border-bdr bg-surface-el text-sm font-semibold text-txt">How to name the photos</div>
+    <div class="p-4 flex flex-col gap-4 text-[12px] text-txt-m">
+      <div>
+        <p class="font-semibold text-txt mb-1">One folder per student — easiest</p>
+        <pre class="bg-bg rounded-lg p-3 font-mono text-[11px] overflow-x-auto">CSE 3rd Year A/
+  CS-001 Ravi Kumar/    front.jpg  left.jpg  right.jpg
+  CS-002 Priya Singh/   1.jpg      2.jpg</pre>
+        <p class="mt-1">The folder is named <code class="font-mono text-primary">&lt;roll&gt; &lt;name&gt;</code>. The photo filenames inside do not matter.</p>
+      </div>
+      <div>
+        <p class="font-semibold text-txt mb-1">All photos in one folder</p>
+        <pre class="bg-bg rounded-lg p-3 font-mono text-[11px] overflow-x-auto">CS-001_Ravi_Kumar.jpg
+CS-001_Ravi_Kumar_2.jpg
+CS-002_Priya_Singh.jpg</pre>
+        <p class="mt-1">Roll number, then <code class="font-mono">_</code>, then the name. A trailing <code class="font-mono">_2</code> is a second photo, not part of the name.</p>
+      </div>
+      <div>
+        <p class="font-semibold text-txt mb-1">A spreadsheet — most reliable</p>
+        <pre class="bg-bg rounded-lg p-3 font-mono text-[11px] overflow-x-auto">students.csv
+roll_no,name,photo
+CS-001,Ravi Kumar,photos/ravi-1.jpg
+CS-001,Ravi Kumar,photos/ravi-2.jpg
+CS-002,"Singh, Priya",photos/priya.jpg</pre>
+        <p class="mt-1">Export it from Google Sheets as CSV and put it beside the photos. Filenames stop mattering, and names with commas or accents survive.</p>
+      </div>
+      <ul class="list-disc pl-5 flex flex-col gap-1">
+        <li>Roll numbers may contain hyphens (<code class="font-mono">21-CSE-014</code>). Only the first space or underscore separates roll from name.</li>
+        <li>JPG, PNG, WEBP, BMP and iPhone HEIC are all read. Photos are re-saved as JPEG.</li>
+        <li><strong>Three photos per student</strong> — front on, turned slightly left, slightly right — identifies noticeably more of the room than one.</li>
+        <li>A face must be at least {{ 80 }} px across, in focus and evenly lit, or that photo is rejected with a reason.</li>
+        <li>Up to {{ max_enrol_photos }} photos per student are kept.</li>
+      </ul>
+      <p class="text-[11px] text-txt-f">Full details, including the Google Drive steps, are in IMPORT.md in the project folder.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function esc(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+/* The three inputs are alternatives. Picking one clears the others so the
+   server is never handed two rosters and left to guess which was meant.
+
+   Both buttons stay enabled and check for themselves. A directory picker does
+   not reliably fire a change event -- Chromium does not for webkitdirectory --
+   so anything that greys a button out based on that event leaves the page
+   looking broken after the teacher has chosen a perfectly good folder. */
+function wireExclusive() {
+  const folder = document.getElementById("imp-folder");
+  const zip = document.getElementById("imp-zip");
+  const path = document.getElementById("imp-path");
+  const clear = (except) => {
+    if (folder && folder !== except) folder.value = "";
+    if (zip && zip !== except) zip.value = "";
+    if (path && path !== except) path.value = "";
+  };
+  for (const [element, event] of [[folder, "change"], [zip, "change"], [path, "input"]]) {
+    if (element) element.addEventListener(event, () => clear(element));
+  }
+}
+wireExclusive();
+
+function payload() {
+  const fd = new FormData();
+  fd.append("class_id", document.getElementById("imp-class").value);
+  fd.append("replace", document.getElementById("imp-replace").checked ? "1" : "0");
+  const zip = document.getElementById("imp-zip");
+  const folder = document.getElementById("imp-folder");
+  const path = document.getElementById("imp-path");
+  if (zip && zip.files.length) {
+    fd.append("archive", zip.files[0]);
+    return fd;
+  }
+  if (folder && folder.files.length) {
+    for (const file of folder.files) {
+      // A browser sends only the base name with the file, so the path inside
+      // the chosen folder has to travel alongside it.
+      fd.append("files", file);
+      fd.append("paths", file.webkitRelativePath || file.name);
+    }
+    return fd;
+  }
+  if (path && path.value.trim()) {
+    fd.append("server_path", path.value.trim());
+    return fd;
+  }
+  return null;
+}
+
+function show(title, html) {
+  document.getElementById("imp-result").classList.remove("hidden");
+  document.getElementById("imp-result-title").textContent = title;
+  document.getElementById("imp-body").innerHTML = html;
+}
+
+async function preview() {
+  const fd = payload();
+  if (!fd) { alert("Choose a folder, a zip, or type a path first."); return; }
+  const button = document.getElementById("imp-preview");
+  button.disabled = true;
+  show("Checking…", '<p class="text-txt-m text-xs">Reading the folder…</p>');
+  try {
+    const res = await fetch("/api/import/preview", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      show("Could not read that", '<p class="text-danger text-xs">' + esc(data.error) + "</p>");
+      return;
+    }
+    let html = '<p class="text-xs text-txt-m mb-3">Read as <strong>' + esc(data.layout) +
+      "</strong> — " + data.ready.length + " student(s) ready, " +
+      data.photo_count + " photo(s).</p>";
+    if (data.ready.length) {
+      html += '<div class="border border-bdr rounded-lg overflow-hidden mb-3 max-h-64 overflow-y-auto">' +
+        data.ready.map(s =>
+          '<div class="flex justify-between items-center px-3 py-1.5 border-b border-bdr last:border-0 text-xs">' +
+          '<span><span class="font-mono text-txt-m">' + esc(s.roll_no) + "</span> " + esc(s.name) + "</span>" +
+          '<span class="font-mono text-[10px] ' + (s.photos >= 2 ? "text-txt-f" : "text-warn") + '">' +
+          s.photos + " photo" + (s.photos === 1 ? "" : "s") + "</span></div>").join("") + "</div>";
+    }
+    if (data.skipped.length) {
+      html += '<p class="text-xs font-semibold text-warn mb-1">' + data.skipped.length + " skipped</p>" +
+        '<ul class="text-[11px] text-txt-m list-disc pl-5 mb-3">' + data.skipped.map(s =>
+          "<li>" + esc((s.roll_no || "?") + " " + s.name) + " — " + esc(s.problems.join("; ")) + "</li>").join("") + "</ul>";
+    }
+    if (data.ignored.length) {
+      html += '<p class="text-[11px] text-txt-f">Ignored: ' +
+        data.ignored.map(i => esc(i.name)).join(", ") + "</p>";
+    }
+    show("Preview — nothing has been changed", html);
+  } catch (err) {
+    show("Could not read that", '<p class="text-danger text-xs">' + esc(err.message) + "</p>");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function start() {
+  const fd = payload();
+  if (!fd) { alert("Choose a folder, a zip, or type a path first."); return; }
+  document.getElementById("imp-start").disabled = true;
+  document.getElementById("imp-preview").disabled = true;
+  document.getElementById("imp-progress").classList.remove("hidden");
+  show("Importing", "");
+  try {
+    const res = await fetch("/api/import/start", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      document.getElementById("imp-progress").classList.add("hidden");
+      show("Import failed", '<p class="text-danger text-xs">' + esc(data.error) + "</p>");
+      document.getElementById("imp-preview").disabled = false;
+      return;
+    }
+    poll(data.job_id);
+  } catch (err) {
+    show("Import failed", '<p class="text-danger text-xs">' + esc(err.message) + "</p>");
+    document.getElementById("imp-preview").disabled = false;
+  }
+}
+
+async function poll(jobId) {
+  try {
+    const res = await fetch("/api/import/" + jobId);
+    const job = await res.json();
+    if (!res.ok || job.error) throw new Error(job.error || "lost track of the import");
+
+    const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
+    document.getElementById("imp-progress-bar").style.width = pct + "%";
+    document.getElementById("imp-progress-count").textContent = job.done + " / " + job.total;
+    document.getElementById("imp-progress-text").textContent =
+      job.state === "running" ? ("Enrolling " + (job.current || "…")) : "Finished";
+
+    if (job.state === "running") { setTimeout(() => poll(jobId), 1000); return; }
+
+    document.getElementById("imp-preview").disabled = false;
+    if (job.state === "failed") {
+      show("Import failed", '<p class="text-danger text-xs">' + esc(job.message) + "</p>");
+      return;
+    }
+    let html = '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">' +
+      [["Added", job.added], ["Updated", job.updated], ["Skipped", job.failed],
+       ["Photos used", job.photos_used]].map(([label, value]) =>
+        '<div class="border border-bdr rounded-lg p-2 text-center"><div class="text-[10px] text-txt-m uppercase tracking-wider">' +
+        label + '</div><div class="text-lg font-bold text-txt">' + value + "</div></div>").join("") + "</div>";
+    if (job.log && job.log.length) {
+      html += '<p class="text-xs font-semibold text-txt-m mb-1">Notes</p>' +
+        '<ul class="text-[11px] text-txt-m list-disc pl-5 max-h-56 overflow-y-auto">' +
+        job.log.map(line => "<li>" + esc(line) + "</li>").join("") + "</ul>";
+    }
+    html += '<a href="/students_page?class_id=' + job.class_id +
+      '" class="inline-block mt-3 bg-primary hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">See the roster</a>';
+    show("Import finished", html);
+    setConsole("imported " + job.added + " added, " + job.updated + " updated");
+  } catch (err) {
+    show("Import failed", '<p class="text-danger text-xs">' + esc(err.message) + "</p>");
+    document.getElementById("imp-preview").disabled = false;
+  }
+}
+</script>
+{% endblock %}

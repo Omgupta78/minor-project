@@ -7,13 +7,17 @@
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
       <h1 class="text-xl font-bold text-txt">Student Database</h1>
-      <p class="text-sm text-txt-m">One clear, front-facing photo per student is all the system needs.</p>
+      <p class="text-sm text-txt-m">Add students one at a time, or import a whole class from a folder. Three photos each identifies noticeably more of the room than one.</p>
     </div>
     <div class="flex flex-wrap gap-2">
       <button onclick="document.getElementById('add-class-modal').style.display='flex'"
               class="bg-white border border-bdr text-txt-m hover:border-primary hover:text-primary font-medium text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-sm">
         <span class="material-symbols-outlined text-[18px]">library_add</span>New Class
       </button>
+      <a href="/students/import{% if class_id %}?class_id={{ class_id }}{% endif %}"
+         class="bg-white border border-bdr text-txt-m hover:border-primary hover:text-primary font-medium text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-sm">
+        <span class="material-symbols-outlined text-[18px]">drive_folder_upload</span>Import a class
+      </a>
       <button onclick="document.getElementById('add-student-modal').style.display='flex'"
               {% if not classes %}disabled title="Create a class first"{% endif %}
               class="bg-primary hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-sm">
