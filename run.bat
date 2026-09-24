@@ -9,6 +9,7 @@ if not exist ".venv" %PYCMD% -m venv .venv
 call .venv\Scripts\activate.bat
 python -m pip install --quiet --upgrade pip
 python -m pip install --quiet -r requirements.txt
+python -m pip install --quiet --no-deps -r requirements-nodeps.txt
 if errorlevel 1 (
   echo Full install failed; installing web-only dependencies. Scanning may be unavailable.
   python -m pip install --quiet Flask==3.1.3 Werkzeug==3.1.6 openpyxl==3.1.5 numpy==1.26.4 Pillow==12.3.0 pillow-heif==1.3.0

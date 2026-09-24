@@ -12,6 +12,24 @@
       <h2 class="font-semibold text-txt text-sm">Import a whole class</h2>
     </div>
 
+    {% if not recognition_ready %}
+    <!-- Said before any photo is chosen. Reading the roster works without the
+         engine, so a teacher could otherwise preview 120 students happily and
+         only be told at the last step that none of them can be enrolled. -->
+    <div class="px-4 py-3 bg-danger-light border-b border-danger/30 text-[12px] text-danger flex items-start gap-2">
+      <span class="material-symbols-outlined text-[18px] mt-px">error</span>
+      <span>
+        <strong>The face recognition engine is not installed on this server,
+        so importing will fail.</strong><br/>
+        Install it with <code class="font-mono">pip install -r requirements.txt</code>
+        then <code class="font-mono">pip install --no-deps -r requirements-nodeps.txt</code>.
+        The second command is required. Run
+        <code class="font-mono">python check_setup.py</code> to check this machine.
+        No compiler or Visual Studio is needed.
+      </span>
+    </div>
+    {% endif %}
+
     <div class="p-4 flex flex-col gap-4">
       <div>
         <label for="imp-class" class="block text-xs font-semibold text-txt-m uppercase tracking-wider mb-1">Enrol into</label>

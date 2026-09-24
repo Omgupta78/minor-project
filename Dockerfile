@@ -5,7 +5,10 @@ ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update && apt-get install -y --no-install-recommends libjpeg62-turbo-dev zlib1g-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt .
-RUN python -m venv /opt/venv && /opt/venv/bin/pip install --upgrade pip wheel && /opt/venv/bin/pip install -r requirements.txt
+COPY requirements-nodeps.txt .
+RUN python -m venv /opt/venv && /opt/venv/bin/pip install --upgrade pip wheel \
+    && /opt/venv/bin/pip install -r requirements.txt \
+    && /opt/venv/bin/pip install --no-deps -r requirements-nodeps.txt
 
 FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends libx11-6 libjpeg62-turbo libgomp1 && rm -rf /var/lib/apt/lists/*

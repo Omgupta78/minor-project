@@ -402,7 +402,7 @@ a clear 503 instead of crashing.
 
 | Platform | Fix |
 | --- | --- |
-| Windows | `pip install dlib-bin` (prebuilt, no compiler), or install Visual Studio Build Tools with "Desktop development with C++" |
+| Windows | `pip install -r requirements.txt` then `pip install --no-deps -r requirements-nodeps.txt`. Both lines are needed; no compiler and no Visual Studio. Run `python check_setup.py` to check. |
 | macOS | `xcode-select --install && brew install cmake` |
 | Ubuntu | `sudo apt install build-essential cmake python3-dev` |
 
