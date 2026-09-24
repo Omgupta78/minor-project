@@ -138,6 +138,8 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("setup checker present", "check_setup.py", "def main", True),
     ("server prints the phone address", "netinfo.py", "def startup_banner", True),
     ("startup warns when phones cannot reach it", "wsgi.py", "startup_banner", True),
+    ("one-command launcher for the phone", "run-phone.sh", "HOST=0.0.0.0", True),
+    ("windows launcher for the phone", "run-phone.bat", "HOST=0.0.0.0", True),
     ("import page warns when the engine is missing", "templates/import_page.html",
      "recognition_ready", True),
 ]
