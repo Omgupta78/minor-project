@@ -113,6 +113,22 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("import formats documented", "IMPORT.md", "roll_no", True),
     ("password recovery tool", "reset_password.py", "def main", True),
     ("build marker shown in the app", "app.py", "def _build_marker", True),
+    # --- installable app ---
+    ("web app manifest", "static/manifest.webmanifest", "standalone", True),
+    ("service worker", "static/sw.js", "faceid-shell-", True),
+    ("worker never caches pages or api", "static/sw.js", "request.mode === \"navigate\"", True),
+    ("manifest served at the root", "app.py", "def manifest", True),
+    ("worker served at root scope", "app.py", "Service-Worker-Allowed", True),
+    ("offline page", "templates/offline.html", "No connection", True),
+    ("install prompt handled", "templates/base.html", "beforeinstallprompt", True),
+    ("ios home screen support", "templates/base.html", "apple-mobile-web-app-capable", True),
+    ("app icons generated from code", "make_icons.py", "def draw_icon", True),
+    ("android project", "android/app/build.gradle", "com.android.application", True),
+    ("android file upload works", "android/app/src/main/java/com/faceid/attendance/MainActivity.java", "onShowFileChooser", True),
+    ("android camera permission", "android/app/src/main/java/com/faceid/attendance/MainActivity.java", "onPermissionRequest", True),
+    ("android server address configurable", "android/app/src/main/java/com/faceid/attendance/SetupActivity.java", "KEY_SERVER", True),
+    ("apk build workflow", ".github/workflows/android.yml", "assembleRelease", True),
+    ("app install documented", "APP.md", "Add to Home Screen", True),
 ]
 
 

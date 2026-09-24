@@ -140,7 +140,14 @@ def clean_period(value) -> str | None:
 # by one before_request hook rather than a decorator on each route: forgetting
 # a decorator silently exposes a route, whereas forgetting to whitelist one
 # merely makes it ask for a login.
-PUBLIC_ENDPOINTS = {"login", "signup", "logout", "static", "healthz"}
+PUBLIC_ENDPOINTS = {
+    "login", "signup", "logout", "static", "healthz",
+    # An installable app has to be able to fetch its manifest, its service
+    # worker and its offline page before anyone has signed in. Redirecting
+    # these to the login page makes the install prompt never appear, with no
+    # error to explain why.
+    "manifest", "service_worker", "offline", "favicon",
+}
 
 
 def teacher_id():
@@ -272,6 +279,49 @@ def change_own_password():
         return redirect(request.referrer or url_for("index"))
     flash("Password changed.", "success")
     return redirect(request.referrer or url_for("index"))
+
+
+# ------------------------------------------------------------ installable app
+@app.get("/manifest.webmanifest")
+def manifest():
+    """The web app manifest: name, icons, colours, how it should open."""
+    return send_from_directory(
+        BASE_DIR / "static", "manifest.webmanifest",
+        mimetype="application/manifest+json",
+    )
+
+
+@app.get("/sw.js")
+def service_worker():
+    """The service worker, served from the root so its scope is the whole app.
+
+    A worker served from /static/ may only control /static/, which would leave
+    every real page uncontrolled -- so this is a route rather than a static
+    file, and it sends Service-Worker-Allowed to say so explicitly.
+
+    The build string is substituted in, which names the cache. Publishing a new
+    version therefore renames the cache and the old one is dropped, instead of
+    a stale stylesheet surviving a deploy.
+    """
+    source = (BASE_DIR / "static" / "sw.js").read_text(encoding="utf-8")
+    response = app.response_class(
+        source.replace("__BUILD__", BUILD.replace('"', "")),
+        mimetype="application/javascript",
+    )
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.get("/offline")
+def offline():
+    """Shown by the service worker when the server cannot be reached."""
+    return render_template("offline.html")
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return send_from_directory(BASE_DIR / "static" / "icons", "favicon.ico")
 
 
 @app.get("/healthz")

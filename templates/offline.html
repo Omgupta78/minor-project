@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<meta name="theme-color" content="#2463eb"/>
+<title>FaceID Attendance | Offline</title>
+<link rel="stylesheet" href="/static/app.css"/>
+<link rel="stylesheet" href="/static/mobile.css"/>
+<style>
+body{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;text-align:center;background:#eef3fa}
+.card{background:#fff;border:1px solid #e6ebf3;border-radius:16px;padding:32px 24px;max-width:380px;box-shadow:0 10px 32px rgba(35,55,96,.09)}
+.mark{width:64px;height:64px;margin:0 auto 16px}
+h1{font-size:19px;font-weight:800;color:#10204a;margin-bottom:8px}
+p{font-size:13px;color:#738099;line-height:1.5;margin-bottom:8px}
+button{margin-top:18px;background:#2463eb;color:#fff;border:0;border-radius:10px;padding:11px 22px;font-size:14px;font-weight:600;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="card">
+    <img class="mark" src="/static/icons/icon-192.png" alt=""/>
+    <h1>No connection to the attendance server</h1>
+    <p>Attendance is never taken offline on purpose: the register has to be the
+       same for everyone, so it is only ever read from the server.</p>
+    <p>Check that the server is running and that this device is on the same
+       network, then try again.</p>
+    <button onclick="location.reload()">Try again</button>
+  </div>
+</body>
+</html>
