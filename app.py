@@ -332,7 +332,13 @@ def healthz():
     running the code I just checked out?" without opening a browser, logging
     in, or trusting a cached page.
     """
-    return jsonify({"ok": True, "build": BUILD, "import_available": True})
+    return jsonify({
+        "ok": True,
+        "build": BUILD,
+        "import_available": True,
+        # So "why did my scan fail" can be answered without a browser.
+        "recognition_ready": RECOGNITION_READY,
+    })
 
 
 @app.context_processor
@@ -558,6 +564,23 @@ def _build_marker() -> str:
 
 
 BUILD = _build_marker()
+
+
+def _recognition_ready() -> bool:
+    """Is the face engine usable? Checked once, at startup.
+
+    Everything except scanning works without it, so the app still starts --
+    but the pages that need it should say so before a teacher picks 120
+    photos, rather than after.
+    """
+    try:
+        recognition.ensure_available()
+        return True
+    except Exception:
+        return False
+
+
+RECOGNITION_READY = _recognition_ready()
 
 
 @app.post("/add-student")
@@ -857,6 +880,7 @@ def import_page():
         class_id=class_id or (classes[0]["id"] if classes else None),
         allow_path_import=ALLOW_PATH_IMPORT,
         max_enrol_photos=MAX_ENROL_PHOTOS,
+        recognition_ready=RECOGNITION_READY,
     )
 
 

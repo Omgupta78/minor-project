@@ -1,0 +1,6 @@
+# Installed with --no-deps on purpose. See the note in requirements.txt: its
+# declared dependency on the source-only "dlib" package is what makes an
+# ordinary install try to compile C++. dlib-bin already provides that module.
+#
+#     pip install --no-deps -r requirements-nodeps.txt
+face_recognition==1.3.0

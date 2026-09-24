@@ -9,7 +9,7 @@ if [ ! -d .venv ]; then "$PY" -m venv .venv; fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
 python -m pip install --quiet --upgrade pip
-python -m pip install --quiet -r requirements.txt || {
+python -m pip install --quiet -r requirements.txt && python -m pip install --quiet --no-deps -r requirements-nodeps.txt || {
   echo "Full install failed; installing the web-only dependencies. Scanning may be unavailable."
   python -m pip install --quiet Flask==3.1.3 Werkzeug==3.1.6 openpyxl==3.1.5 numpy==1.26.4 Pillow==12.3.0 pillow-heif==1.3.0
 }

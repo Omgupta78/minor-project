@@ -129,6 +129,15 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("android server address configurable", "android/app/src/main/java/com/faceid/attendance/SetupActivity.java", "KEY_SERVER", True),
     ("apk build workflow", ".github/workflows/android.yml", "assembleRelease", True),
     ("app install documented", "APP.md", "Add to Home Screen", True),
+    # --- installing the face engine without a compiler ---
+    ("face engine installed from a wheel", "requirements.txt", "dlib-bin", True),
+    ("source-only dlib is not resolved", "requirements-nodeps.txt", "face_recognition", True),
+    ("face_recognition kept out of the resolver", "requirements.txt", "face_recognition==", False),
+    ("no false claim that a compiler is needed", "recognition.py",
+     "On Windows this needs Visual Studio Build Tools", False),
+    ("setup checker present", "check_setup.py", "def main", True),
+    ("import page warns when the engine is missing", "templates/import_page.html",
+     "recognition_ready", True),
 ]
 
 

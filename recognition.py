@@ -180,11 +180,20 @@ def _fr():
     try:
         import face_recognition  # noqa: WPS433
     except Exception as exc:  # pragma: no cover - depends on local install
+        # This message used to say Windows needed Visual Studio Build Tools.
+        # It does not, and following that advice costs hours and gigabytes for
+        # nothing: dlib-bin is a pre-built wheel. What actually breaks an
+        # install is pip resolving face_recognition's dependency on the
+        # source-only "dlib" package, which is why it must be installed with
+        # --no-deps. It also pointed at README-run.md, which does not exist.
         raise RecognitionUnavailable(
-            "face_recognition/dlib is not available. Install with\n"
+            "The face recognition engine is not installed.\n"
+            "Install it with BOTH of these, in order:\n"
             "    pip install -r requirements.txt\n"
-            "On Windows this needs Visual Studio Build Tools "
-            "(Desktop development with C++). See README-run.md."
+            "    pip install --no-deps -r requirements-nodeps.txt\n"
+            "The second line matters: without it pip tries to compile dlib "
+            "from source and fails. No compiler or Visual Studio is needed.\n"
+            "Run 'python check_setup.py' for a check of this machine."
         ) from exc
     return face_recognition
 
