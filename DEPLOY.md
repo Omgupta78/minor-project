@@ -185,6 +185,69 @@ This is genuinely the right answer for most schools.
 
 ---
 
+## Showing it to someone: a temporary public link
+
+For a demo, a review or a submission you often want a URL a marker can open,
+without setting up hosting. Two ways, in order of how long the link needs to
+last.
+
+### A Cloudflare quick tunnel (minutes, dies when you close it)
+
+Run the app as usual, then point a tunnel at it from **the same machine**:
+
+```bash
+# 1. start the app (leave this terminal running)
+./run.sh
+
+# 2. in a second terminal, install cloudflared and open a tunnel
+#    macOS:    brew install cloudflared
+#    Windows:  winget install --id Cloudflare.cloudflared
+#    Linux:    see https://github.com/cloudflare/cloudflared/releases
+cloudflared tunnel --url http://127.0.0.1:5000
+```
+
+It prints a `https://<random-words>.trycloudflare.com` URL. That is your link.
+It works until you press Ctrl+C, and the address is different every time.
+
+The tunnel needs **outbound TCP and UDP on port 7844** to Cloudflare's edge.
+College and office networks often block it; if the tunnel reports "HTTP/2
+connection is blocked or unreachable", that is what happened, and no flag will
+work around it. Use a phone hotspot, or deploy to Render below.
+
+### Harden it first
+
+A quick tunnel is the public internet, not a private demo. Before you share
+the URL, restart the app with:
+
+```bash
+export SECRET_KEY="$(cat instance/secret_key)"
+export PRODUCTION=1 ALLOW_SIGNUP=0 COOKIE_SECURE=1 HOST=127.0.0.1 PORT=8000
+gunicorn --config gunicorn.conf.py wsgi:app
+```
+
+and point the tunnel at port 8000 instead. That gives you the production
+server rather than Flask's development one, a session cookie that only travels
+over HTTPS, and **registration closed**, so a stranger who finds the URL
+cannot create an account. Create your own account first, while
+`ALLOW_SIGNUP=1`, then close it.
+
+**Do not put real students' photographs behind a quick tunnel.** Enrolment
+photos are biometric data. For a demo, enrol yourself and a few friends who
+have agreed to it, and delete them afterwards. A link anyone can open is not
+where a class's faces belong, however short-lived it is.
+
+### Render (a link that survives, free)
+
+`render.yaml` in this repository is a Render blueprint. New → Blueprint, point
+it at your fork, and Render builds the Dockerfile and gives you a permanent
+`https://<name>.onrender.com` address with HTTPS. Set `ALLOW_SIGNUP=0` in the
+dashboard once you have created your account.
+
+The free plan sleeps after inactivity, so the first request after a pause
+takes about a minute, and its disk is ephemeral -- **students and attendance
+are wiped on every redeploy**. That is fine for showing the app works and
+wrong for a real class; see the persistent-disk note under Option B.
+
 ## Upgrading an existing installation
 
 The accounts release changes the schema: classes gain an owner, and roll
