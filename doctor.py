@@ -111,6 +111,8 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("import command line tool", "import_students.py", "--dry-run", True),
     ("import tests present", "importtest.py", "zip slip", False),
     ("import formats documented", "IMPORT.md", "roll_no", True),
+    ("password recovery tool", "reset_password.py", "def main", True),
+    ("build marker shown in the app", "app.py", "def _build_marker", True),
 ]
 
 
