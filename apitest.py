@@ -209,7 +209,77 @@ check(
 check("the firewall, the other silent cause, is mentioned", "firewall" in bound_all)
 
 
-print("\n8. maintenance keeps enrolled photos and removes only strays")
+print("\n8. the camera works over plain http, where mediaDevices does not exist")
+# Reported from a phone at http://172.31.75.211:5000: "Camera error: Cannot
+# read properties of undefined (reading 'getUserMedia')". navigator.mediaDevices
+# is present only in a secure context, so on the LAN address the phone app uses
+# it is undefined, and the old code read straight through it.
+home = client.get("/").get_data(as_text=True)
+check(
+    "the page never reads .getUserMedia without checking mediaDevices first",
+    "liveCameraAvailable()" in home
+    and home.index("function liveCameraAvailable") < home.index("mediaDevices.getUserMedia"),
+    "a plain-http phone gets a TypeError instead of a camera",
+)
+check(
+    "there is a capture input to fall back to",
+    'id="camera-input"' in home and 'capture="environment"' in home,
+)
+check(
+    "openCamera uses it when there is no live camera",
+    "if (!liveCameraAvailable()) { useNativeCamera(); return; }" in home,
+)
+check(
+    "the gallery picker stays multi-select and captureless",
+    'id="file-input"' in home and 'multiple' in home.split('id="file-input"')[1][:120],
+    "capture silently overrides multiple, so the two inputs must stay separate",
+)
+check(
+    "the live path asks for a usable resolution",
+    "width: { ideal: 3840 }" in home,
+    "the default stream is ~640x480, where a back row is unidentifiable",
+)
+
+android = Path("android/app/src/main/java/com/faceid/attendance/MainActivity.java")
+if android.exists():
+    java = android.read_text()
+    check(
+        "the WebView launches the camera itself for a capture input",
+        "isCaptureEnabled()" in java and "ACTION_IMAGE_CAPTURE" in java,
+        "createIntent() drops capture, so the APK would open a file browser",
+    )
+    check(
+        "the output uri is in the clip data, not only the extra",
+        "setClipData" in java and "FLAG_GRANT_WRITE_URI_PERMISSION" in java,
+        "a uri in an extra carries no grant and the photo comes back empty",
+    )
+    manifest = Path("android/app/src/main/AndroidManifest.xml").read_text()
+    check(
+        "the camera is visible to resolveActivity on Android 11+",
+        "<queries>" in manifest and "IMAGE_CAPTURE" in manifest,
+        "package visibility hides it and capture falls back silently",
+    )
+    check("the capture provider is registered and not exported",
+          "CaptureProvider" in manifest and 'android:exported="false"' in manifest)
+
+    # The app's whole source sat inside a directory called "attendance", and an
+    # unanchored .gitignore rule meant for a data folder matched it at depth.
+    # Everything built here and nothing was in the repository.
+    if Path(".git").exists():
+        import subprocess
+        tracked = subprocess.run(
+            ["git", "ls-files", "android/app/src/main/java"],
+            capture_output=True, text=True,
+        ).stdout.split()
+        on_disk = [str(f) for f in Path("android/app/src/main/java").rglob("*.java")]
+        check(
+            "every Android source file is actually in the repository",
+            len(tracked) >= len(on_disk) > 0,
+            f"{len(tracked)} tracked, {len(on_disk)} on disk -- a clone cannot build the app",
+        )
+
+
+print("\n9. maintenance keeps enrolled photos and removes only strays")
 import maintenance
 
 faces = Path(os.environ["FACES_DIR"])
