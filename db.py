@@ -98,6 +98,29 @@ CREATE TABLE IF NOT EXISTS attendance (
     UNIQUE (session_id, student_id)
 );
 
+-- Bulk enrolment of a whole class takes minutes, which is longer than a web
+-- request should live, so it runs in the background and reports progress
+-- through this table. In the database rather than in memory so the progress
+-- page can be served by a different worker than the one doing the work.
+CREATE TABLE IF NOT EXISTS import_jobs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    teacher_id      INTEGER NOT NULL,
+    class_id        INTEGER NOT NULL,
+    state           TEXT    NOT NULL DEFAULT 'running',
+    total           INTEGER NOT NULL DEFAULT 0,
+    done            INTEGER NOT NULL DEFAULT 0,
+    current         TEXT    NOT NULL DEFAULT '',
+    added           INTEGER NOT NULL DEFAULT 0,
+    updated         INTEGER NOT NULL DEFAULT 0,
+    failed          INTEGER NOT NULL DEFAULT 0,
+    photos_used     INTEGER NOT NULL DEFAULT 0,
+    photos_rejected INTEGER NOT NULL DEFAULT 0,
+    message         TEXT    NOT NULL DEFAULT '',
+    log             TEXT    NOT NULL DEFAULT '',
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    finished_at     TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_students_class   ON students (class_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_class   ON sessions (class_id, date);
 CREATE INDEX IF NOT EXISTS idx_attendance_sess  ON attendance (session_id);
@@ -115,6 +138,10 @@ def connect(db_path: Optional[os.PathLike | str] = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # A bulk import writes from a background thread while the progress page
+    # reads from the request thread. Without this, the reader raises "database
+    # is locked" the moment the two overlap instead of waiting its turn.
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -162,19 +189,30 @@ def create_class(conn, name: str, subject: str = "", teacher_id: Optional[int] =
     teacher, so the lookup that follows an ignored insert must be scoped the
     same way or one teacher would silently be handed another's class.
     """
-    cur = conn.execute(
-        "INSERT OR IGNORE INTO classes (name, subject, teacher_id) VALUES (?, ?, ?)",
-        (name.strip(), subject.strip(), teacher_id),
-    )
-    if cur.lastrowid:
-        return cur.lastrowid
+    name, subject = name.strip(), subject.strip()
+    # Look the class up first rather than relying on what INSERT OR IGNORE
+    # reports. Two things went wrong the other way round:
+    #   * an ignored insert leaves cur.lastrowid pointing at whatever this
+    #     connection inserted last, so on a long-lived connection (the CLI
+    #     tools, migrate_to_db.py, the tests) a duplicate class handed back
+    #     some *other* class's id and students were enrolled onto the wrong
+    #     roster;
+    #   * SQLite treats NULLs as distinct in a UNIQUE constraint, so for an
+    #     unclaimed class (teacher_id IS NULL) the insert was never ignored
+    #     at all and re-running the importer piled up duplicate classes.
     row = conn.execute(
         """SELECT id FROM classes
             WHERE name = ? AND subject = ?
               AND teacher_id IS ?""",
-        (name.strip(), subject.strip(), teacher_id),
+        (name, subject, teacher_id),
     ).fetchone()
-    return row["id"]
+    if row is not None:
+        return int(row["id"])
+    cur = conn.execute(
+        "INSERT INTO classes (name, subject, teacher_id) VALUES (?, ?, ?)",
+        (name, subject, teacher_id),
+    )
+    return int(cur.lastrowid)
 
 
 def list_classes(conn, teacher_id: Optional[int] = None) -> list[sqlite3.Row]:
@@ -300,9 +338,15 @@ def encoding_counts(conn, class_id: Optional[int] = None) -> dict[int, int]:
     counts: dict[int, int] = {}
     for row in list_students(conn, class_id):
         counts[row["id"]] = 1 if row["encoding"] is not None else 0
+    if not counts:
+        return counts
     try:
+        placeholders = ",".join("?" * len(counts))
         rows = conn.execute(
-            "SELECT student_id, COUNT(*) AS n FROM student_encodings GROUP BY student_id"
+            f"""SELECT student_id, COUNT(*) AS n FROM student_encodings
+                 WHERE student_id IN ({placeholders})
+                 GROUP BY student_id""",
+            list(counts),
         ).fetchall()
     except Exception:  # table missing on a database created by an older build
         return counts
@@ -315,6 +359,34 @@ def encoding_counts(conn, class_id: Optional[int] = None) -> dict[int, int]:
 def clear_student_encodings(conn, student_id: int) -> None:
     """Drop the extra photos, keeping the primary encoding."""
     conn.execute("DELETE FROM student_encodings WHERE student_id = ?", (student_id,))
+
+
+def student_photo_names(conn, student_id: int) -> set[str]:
+    """Every file in FACES_DIR this student references, primary and extras.
+
+    Deleting or re-enrolling a student has to remove all of them. Using only
+    students.photo_path leaves the second, third and fourth enrolment photos
+    on disk forever.
+    """
+    names = {
+        row["photo_path"]
+        for row in conn.execute(
+            "SELECT photo_path FROM students WHERE id = ? AND photo_path IS NOT NULL",
+            (student_id,),
+        )
+    }
+    try:
+        names.update(
+            row["photo_path"]
+            for row in conn.execute(
+                """SELECT photo_path FROM student_encodings
+                    WHERE student_id = ? AND photo_path IS NOT NULL""",
+                (student_id,),
+            )
+        )
+    except sqlite3.OperationalError:  # older database without the table
+        pass
+    return {name for name in names if name}
 
 
 def list_students(
@@ -370,15 +442,25 @@ def known_faces(conn, class_id: Optional[int] = None, teacher_id: Optional[int] 
     # contributes three rows to the matrix; they all carry the same label, so
     # whichever one is closest wins and the student is still identified once.
     extra: dict[int, list] = {}
-    try:
-        for row in conn.execute(
-            "SELECT student_id, encoding FROM student_encodings ORDER BY id"
-        ):
-            extra.setdefault(row["student_id"], []).append(
-                blob_to_encoding(row["encoding"])
-            )
-    except Exception:  # database created before this table existed
-        extra = {}
+    wanted = [r["id"] for r in rows]
+    if wanted:
+        try:
+            # Scoped to this roster on purpose. Reading every row in
+            # student_encodings would pull the whole server's biometric data
+            # into memory on every scan, and it grows with the number of
+            # teachers rather than with the size of the class being scanned.
+            placeholders = ",".join("?" * len(wanted))
+            for row in conn.execute(
+                f"""SELECT student_id, encoding FROM student_encodings
+                     WHERE student_id IN ({placeholders})
+                     ORDER BY id""",
+                wanted,
+            ):
+                extra.setdefault(row["student_id"], []).append(
+                    blob_to_encoding(row["encoding"])
+                )
+        except Exception:  # database created before this table existed
+            extra = {}
 
     ids: list[int] = []
     labels: list[dict] = []
@@ -691,6 +773,42 @@ def dashboard_stats(
         "avg_percent": avg,
         "defaulters": sum(1 for s in summary if s["defaulter"]),
     }
+
+
+# ---------------------------------------------------------------- import jobs
+def create_import_job(conn, teacher_id: int, class_id: int, total: int) -> int:
+    cur = conn.execute(
+        """INSERT INTO import_jobs (teacher_id, class_id, total, state)
+           VALUES (?, ?, ?, 'running')""",
+        (teacher_id, class_id, total),
+    )
+    return int(cur.lastrowid)
+
+
+def update_import_job(conn, job_id: int, **fields) -> None:
+    allowed = {
+        "state", "total", "done", "current", "added", "updated", "failed",
+        "photos_used", "photos_rejected", "message", "log", "finished_at",
+    }
+    sets, params = [], []
+    for key, value in fields.items():
+        if key not in allowed:
+            raise ValueError(f"unknown import job field: {key}")
+        sets.append(f"{key} = ?")
+        params.append(value)
+    if not sets:
+        return
+    params.append(job_id)
+    conn.execute(f"UPDATE import_jobs SET {', '.join(sets)} WHERE id = ?", params)
+
+
+def get_import_job(conn, job_id: int, teacher_id: Optional[int] = None):
+    sql = "SELECT * FROM import_jobs WHERE id = ?"
+    params: list = [job_id]
+    if teacher_id is not None:
+        sql += " AND teacher_id = ?"
+        params.append(teacher_id)
+    return conn.execute(sql, params).fetchone()
 
 
 if __name__ == "__main__":

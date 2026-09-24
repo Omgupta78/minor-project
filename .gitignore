@@ -35,3 +35,6 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+
+# rendertest.py writes its rendered pages here
+render/

@@ -28,7 +28,10 @@ import numpy as np
 
 # Match threshold. Lower is stricter. 0.5 is a good default for dlib's
 # 128-D embeddings; 0.45 for a stricter setup, 0.55 if you get too many misses.
-MATCH_DISTANCE = float(os.environ.get("MATCH_DISTANCE", "0.50"))
+# 0.52 rather than 0.50: on the 120-student hall benchmark it identified three
+# more students per photo and still named none of the 20 held-out strangers.
+# Above 0.54 a stranger starts borrowing a name, so that is the ceiling.
+MATCH_DISTANCE = float(os.environ.get("MATCH_DISTANCE", "0.52"))
 
 # Faces whose best distance falls between MATCH_DISTANCE and REVIEW_DISTANCE are
 # not auto-accepted: they are surfaced to the teacher as "needs review".
@@ -66,6 +69,22 @@ TILE_OVERLAP = int(os.environ.get("TILE_OVERLAP", "240"))
 # and enlarged before encoding, which is the single biggest win for the back
 # of the room.
 SMALL_FACE_PX = int(os.environ.get("SMALL_FACE_PX", "110"))
+# Below this width a face is detected but rarely identified. Measured on the
+# 120-seat hall benchmark, one enrolment photo per student:
+#
+#   face width   detected      identified
+#   114 px       20/20         19/20
+#    74 px       20/20         20/20
+#    54 px       20/20         19/20
+#    43 px       20/20         16/20
+#    36 px       19/20         14/20
+#    30 px       17/20         10/20
+#
+# Detection holds up all the way down; it is the encoding that runs out of
+# pixels. No threshold fixes that, so when a photo is full of faces this small
+# the honest answer is to tell the teacher to take a closer photo of the back
+# rows -- the scan merges several photos and keeps each student's best sighting.
+READABLE_FACE_PX = int(os.environ.get("READABLE_FACE_PX", "45"))
 UPSCALE_FACE_PX = int(os.environ.get("UPSCALE_FACE_PX", "150"))
 MAX_UPSCALE = float(os.environ.get("MAX_UPSCALE", "4.0"))
 CROP_MARGIN = float(os.environ.get("CROP_MARGIN", "0.45"))
@@ -89,7 +108,30 @@ SMALL_FACE_SLACK = float(os.environ.get("SMALL_FACE_SLACK", "0.06"))
 #   SMALL_FACE_PENALTY - a face that had to be enlarged is noisier, so it has
 #                        to clear a slightly stricter bar to be auto-accepted.
 MATCH_MARGIN = float(os.environ.get("MATCH_MARGIN", "0.06"))
-SMALL_FACE_PENALTY = float(os.environ.get("SMALL_FACE_PENALTY", "0.04"))
+# Measured on a 120-seat hall photo (4000x3000, rows at 4-15 m, face widths
+# 114 px down to 30 px) against a gallery of 100 enrolled students with 20
+# seated students deliberately held out of the gallery to act as strangers:
+#
+#   penalty   correct    strangers wrongly named
+#   0.04      67 / 97    0
+#   0.02      77 / 97    0
+#   0.00      82 / 97    0
+#
+# The penalty was written to stop a noisy enlarged face being accepted, but at
+# hall scale almost every face is enlarged, so it only ever rejected correct
+# matches -- it bought no precision at all. It is kept as a knob, defaulting
+# off; raise it if your own calibration run shows false matches on far faces.
+SMALL_FACE_PENALTY = float(os.environ.get("SMALL_FACE_PENALTY", "0.0"))
+
+# How many faces must be waiting before it is worth starting worker processes.
+# dlib holds the GIL, so threads give no speedup at all (measured 1.02x); only
+# separate processes help. Starting the pool costs about 1.4 s, so a small
+# class is quicker left alone.
+PARALLEL_MIN_FACES = int(os.environ.get("PARALLEL_MIN_FACES", "24"))
+# 0 = choose automatically, 1 = never parallelise, N = exactly N workers.
+# Each worker loads its own copy of the dlib models, about 250 MB resident, so
+# a 512 MB host should leave this at 1.
+SCAN_WORKERS = int(os.environ.get("SCAN_WORKERS", "0"))
 
 # Rescue pass for low-resolution photos: a screenshot, a WhatsApp-compressed
 # forward, or a photo taken from the back of a hall. Tiling cannot help there
@@ -215,10 +257,27 @@ def bgr_to_rgb(frame: np.ndarray) -> np.ndarray:
 def decode_image_bytes(data: bytes) -> Optional[np.ndarray]:
     """Decode raw upload bytes into an RGB array (None if not an image).
 
-    OpenCV cannot read HEIC/HEIF at all, and that is what an iPhone hands over
-    when the teacher picks a photo from the camera roll, so anything OpenCV
-    rejects gets a second attempt through Pillow.
+    Pillow first, OpenCV only as a fallback, and the order is not cosmetic.
+
+    When cv2.imdecode is the first image decode to run in a process, dlib's
+    HOG detector is crippled for the rest of that process's life: on the
+    120-student benchmark photo the same array yields 7 faces instead of 121,
+    and 0 on the next call. Decoding anything with Pillow first -- merely
+    importing it is not enough -- avoids it entirely, and cv2 is then harmless
+    (cv2.resize in _limit_size gives detection identical to Pillow's resize).
+
+    This mattered because enrolment loads photos through Pillow, by way of
+    face_recognition.load_image_file, while a scan used to come through here
+    and take the OpenCV path. Enrolment looked fine and every real scan of a
+    large room silently lost most of the class. Pillow also reads HEIC through
+    pillow-heif, which OpenCV cannot read at all, so it is the better primary
+    decoder regardless.
+
+    decodetest.py guards this: it asserts both paths detect the same faces.
     """
+    decoded = decode_with_pillow(data)
+    if decoded is not None:
+        return decoded
     try:
         import cv2
 
@@ -226,8 +285,8 @@ def decode_image_bytes(data: bytes) -> Optional[np.ndarray]:
         if arr is not None:
             return bgr_to_rgb(arr)
     except Exception:
-        pass  # fall through to Pillow
-    return decode_with_pillow(data)
+        pass
+    return None
 
 
 def decode_with_pillow(data: bytes) -> Optional[np.ndarray]:
@@ -465,6 +524,55 @@ def _upscale(crop: np.ndarray, factor: float) -> np.ndarray:
     return np.asarray(Image.fromarray(image).resize(size, Image.LANCZOS))
 
 
+def prepare_small_face(rgb: np.ndarray, box: tuple) -> Optional[tuple]:
+    """Cut a distant face out and enlarge it, ready to be encoded.
+
+    Split out from encode_small_face so the expensive dlib half can be handed
+    to a worker process. This half is pure numpy/Pillow and stays in the
+    caller: it is about 1.5 ms per face against 215 ms for the encode.
+    """
+    image = np.asarray(rgb)
+    top, right, bottom, left = (int(v) for v in box)
+    face_px = max(1, min(right - left, bottom - top))
+    factor = min(MAX_UPSCALE, max(1.0, UPSCALE_FACE_PX / face_px))
+
+    crop, off_x, off_y = crop_with_margin(image, box)
+    if crop.size == 0:
+        return None
+    big = _upscale(crop, factor)
+    inner = (
+        int(round((top - off_y) * factor)),
+        int(round((right - off_x) * factor)),
+        int(round((bottom - off_y) * factor)),
+        int(round((left - off_x) * factor)),
+    )
+    return big, inner
+
+
+def encode_prepared(job: tuple, fr=None) -> Optional[np.ndarray]:
+    """Encode one enlarged crop. Runs in a worker process when parallelised.
+
+    Re-detects at the enlarged size first: a box the detector draws here is
+    better aligned than our scaled-up original, and alignment is most of
+    encoding quality. If it finds nothing, the scaled box is used as-is.
+    """
+    big, inner = job
+    fr = _fr() if fr is None else fr
+    try:
+        found = fr.face_locations(big, number_of_times_to_upsample=0)
+    except TypeError:  # a stub or older signature
+        found = fr.face_locations(big)
+    if found:
+        inner = max(found, key=lambda b: (b[2] - b[0]) * (b[1] - b[3]))
+    encodings = fr.face_encodings(big, [inner], num_jitters=SMALL_FACE_JITTERS)
+    return encodings[0] if encodings else None
+
+
+def _encode_prepared_worker(job: tuple):
+    """Module-level entry point for the process pool (must be picklable)."""
+    return encode_prepared(job)
+
+
 def encode_small_face(
     rgb: np.ndarray, box: tuple, fr=None
 ) -> Optional[np.ndarray]:
@@ -477,35 +585,76 @@ def encode_small_face(
     with margin, then re-detecting so the face is properly framed -- is what
     turns a missed back row into a matched one.
     """
-    fr = _fr() if fr is None else fr
-    image = np.asarray(rgb)
-    top, right, bottom, left = (int(v) for v in box)
-    face_px = max(1, min(right - left, bottom - top))
-    factor = min(MAX_UPSCALE, max(1.0, UPSCALE_FACE_PX / face_px))
-
-    crop, off_x, off_y = crop_with_margin(image, box)
-    if crop.size == 0:
+    job = prepare_small_face(rgb, box)
+    if job is None:
         return None
-    big = _upscale(crop, factor)
+    return encode_prepared(job, fr)
 
-    inner = (
-        int(round((top - off_y) * factor)),
-        int(round((right - off_x) * factor)),
-        int(round((bottom - off_y) * factor)),
-        int(round((left - off_x) * factor)),
-    )
-    # Re-detect at the enlarged size. A box the detector draws here is better
-    # aligned than our scaled-up original, and alignment is most of encoding
-    # quality. If it finds nothing, fall back to the scaled box.
+
+def worker_count(faces: int) -> int:
+    """How many processes to encode `faces` faces with. 1 means stay serial."""
+    if SCAN_WORKERS == 1 or faces < PARALLEL_MIN_FACES:
+        return 1
+    if SCAN_WORKERS > 1:
+        return SCAN_WORKERS
+    cpus = os.cpu_count() or 1
+    if cpus < 2:
+        return 1
+    return max(1, min(4, cpus))
+
+
+def main_module_is_guarded() -> bool:
+    """Is it safe for a worker process to re-import the program's entry point?
+
+    forkserver and spawn both re-execute __main__ in every worker. A program
+    whose entry point is wrapped in `if __name__ == "__main__":` is unaffected,
+    which covers app.py, wsgi.py and gunicorn. A plain script without that
+    guard has its whole body re-run once per worker instead -- measured at
+    259 s against 18 s for a scan whose caller enrolled students at import
+    time. Rather than leave that as a trap, the pool simply declines.
+    """
+    import sys
+
+    main = sys.modules.get("__main__", None)
+    path = getattr(main, "__file__", None)
+    if path is None:
+        return True  # -c, -m, or an interactive session: nothing to re-import
     try:
-        found = fr.face_locations(big, number_of_times_to_upsample=0)
-    except TypeError:  # a stub or older signature
-        found = fr.face_locations(big)
-    if found:
-        inner = max(found, key=lambda b: (b[2] - b[0]) * (b[1] - b[3]))
+        source = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return '__name__ == "__main__"' in source or "__name__ == '__main__'" in source
 
-    encodings = fr.face_encodings(big, [inner], num_jitters=SMALL_FACE_JITTERS)
-    return encodings[0] if encodings else None
+
+def _encode_jobs_parallel(jobs: list, workers: int) -> Optional[list]:
+    """Encode prepared crops across processes. None means 'could not'.
+
+    forkserver, not the default fork: gunicorn runs threaded workers by
+    default and forking a threaded process can deadlock in the child. spawn
+    is the fallback for platforms without forkserver. Both cost about 1.4 s
+    to start, which a 120-face photo repays many times over.
+    """
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    if not main_module_is_guarded():
+        print(
+            "  [scan] the calling script has no `if __name__ == \"__main__\":` "
+            "guard, so worker processes would re-run it; encoding serially"
+        )
+        return None
+
+    methods = multiprocessing.get_all_start_methods()
+    method = "forkserver" if "forkserver" in methods else "spawn"
+    try:
+        context = multiprocessing.get_context(method)
+        with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
+            return list(pool.map(_encode_prepared_worker, jobs, chunksize=4))
+    except Exception as exc:  # pragma: no cover - platform dependent
+        # A restricted container may forbid new processes. Losing the speedup
+        # is acceptable; failing the teacher's scan is not.
+        print(f"  [scan] parallel encoding unavailable ({exc}); using one process")
+        return None
 
 
 def encode_boxes(rgb: np.ndarray, boxes: Sequence[tuple]) -> list[Optional[np.ndarray]]:
@@ -530,9 +679,29 @@ def encode_boxes(rgb: np.ndarray, boxes: Sequence[tuple]) -> list[Optional[np.nd
         for index, encoding in zip(big_enough, encodings):
             out[index] = encoding
 
-    for index, box in enumerate(boxes):
-        if out[index] is None:
-            out[index] = encode_small_face(image, box, fr)
+    # Everything else is a far face: crop it out of the original, enlarge it,
+    # then encode. That encode is the whole cost of a hall photo -- 215 ms a
+    # face, 120 faces -- so it is the one thing worth spreading over cores.
+    pending = [i for i in range(len(boxes)) if out[i] is None]
+    jobs, targets = [], []
+    for index in pending:
+        job = prepare_small_face(image, boxes[index])
+        if job is not None:
+            jobs.append(job)
+            targets.append(index)
+
+    workers = worker_count(len(jobs))
+    # Only the real library can be handed to a worker process; the test suites
+    # substitute an in-process stub for _fr, which would not survive a fork.
+    if workers > 1 and getattr(fr, "__name__", "") == "face_recognition":
+        results = _encode_jobs_parallel(jobs, workers)
+        if results is not None:
+            for index, encoding in zip(targets, results):
+                out[index] = encoding
+            return out
+
+    for index, job in zip(targets, jobs):
+        out[index] = encode_prepared(job, fr)
     return out
 
 
@@ -699,6 +868,11 @@ def identify(
     # encoding; big ones go through one batched call as before.
     encodings = encode_boxes(image, boxes)
 
+    # The owner of every gallery row, as an array, so the runner-up search
+    # below is one vectorised comparison rather than a Python loop per face.
+    # At hall scale that loop ran 120 faces x 600 rows on every photo.
+    owners = np.array([label["id"] for label in labels])
+
     faces: list[Face] = []
     for box, encoding in zip(boxes, encodings):
         top, right, bottom, left = (int(v) for v in box)
@@ -731,12 +905,8 @@ def identify(
             # How much better was the winner than the best *other* student?
             # Several reference photos of the same student are teammates, not
             # competitors, so they are excluded from this comparison.
-            rivals = [
-                float(d)
-                for d, label in zip(distances, labels)
-                if label["id"] != winner
-            ]
-            gap = min(rivals) - dist if rivals else None
+            rivals = distances[owners != winner]
+            gap = float(rivals.min()) - dist if rivals.size else None
             face.runner_up_gap = None if gap is None else round(gap, 4)
 
             # A face that had to be enlarged is noisier in both directions, so
@@ -874,6 +1044,8 @@ def summarise(per_image: Sequence[Sequence[Face]], best: dict[int, Face]) -> dic
     flat = [face for faces in per_image for face in faces]
     matched = [f for f in best.values() if f.status == "matched"]
     review = [f for f in best.values() if f.status == "review"]
+    widths = sorted(f.face_px for f in flat if f.face_px)
+    too_small = [f for f in flat if f.face_px and f.face_px < READABLE_FACE_PX]
     # NOTE: these counts are merged into the /api/scan response, which already
     # carries the per-photo detail array under "images". This key must stay
     # "images_scanned" or it would overwrite that array with a number and the
@@ -885,6 +1057,13 @@ def summarise(per_image: Sequence[Sequence[Face]], best: dict[int, Face]) -> dic
         "needs_review": len(review),
         "unknown": sum(1 for f in flat if f.status in ("unknown", "duplicate")),
         "repeats": sum(1 for f in flat if f.status == "repeat"),
+        # Face size is the one thing that actually decides whether the back of
+        # the room can be identified, so report it rather than leaving the
+        # teacher to guess why the last two rows came back unknown.
+        "median_face_px": widths[len(widths) // 2] if widths else 0,
+        "smallest_face_px": widths[0] if widths else 0,
+        "faces_too_small": len(too_small),
+        "readable_face_px": READABLE_FACE_PX,
     }
 
 

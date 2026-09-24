@@ -400,8 +400,12 @@ check(
     f"{faces[0].status} / {faces[0].runner_up_gap}",
 )
 
-# An enlarged face is noisier, so it needs a stricter distance to be accepted
-# outright -- the same number that passes for a near face only earns a review.
+# SMALL_FACE_PENALTY holds an enlarged face to a stricter distance than a near
+# one. It now defaults to 0, because on a 120-seat hall photo almost every face
+# is enlarged and the penalty only ever rejected correct matches: at 0.04 it
+# cost 15 of 97 seated students and named no extra strangers. The mechanism is
+# kept for deployments whose own calibration shows false matches on far faces,
+# so both settings are tested.
 stub = with_stub(Stub(shape=(400, 400), boxes=[near, far]))
 faces = recognition.identify(room, matrix_at(0.48), labels)
 by_px = {f.face_px: f for f in faces}
@@ -411,10 +415,31 @@ check(
     by_px[160].status,
 )
 check(
-    "the same distance on an enlarged far face waits for review",
-    by_px[60].status == "review",
+    "by default a far face at the same distance is accepted too",
+    by_px[60].status == "matched",
     by_px[60].status,
 )
+
+penalty = recognition.SMALL_FACE_PENALTY
+try:
+    recognition.SMALL_FACE_PENALTY = 0.04
+    # 0.50 sits between the penalised limit for a far face (0.52 - 0.04) and
+    # the plain limit a near face is held to (0.52).
+    stub = with_stub(Stub(shape=(400, 400), boxes=[near, far]))
+    faces = recognition.identify(room, matrix_at(0.50), labels)
+    by_px = {f.face_px: f for f in faces}
+    check(
+        "with a penalty configured, the enlarged face waits for review",
+        by_px[60].status == "review",
+        by_px[60].status,
+    )
+    check(
+        "and the near face is unaffected by the penalty",
+        by_px[160].status == "matched",
+        by_px[160].status,
+    )
+finally:
+    recognition.SMALL_FACE_PENALTY = penalty
 
 
 section("low-resolution photos get a second enlarged pass")

@@ -17,6 +17,7 @@ env = Environment(loader=FileSystemLoader(str(BASE_DIR / "templates")))
 env.globals["get_flashed_messages"] = lambda **k: [
     ("success", "Student added successfully."),
     ("error", "No face detected in that photo."),
+    ("warning", "One photo was rejected and the rest were kept."),
 ]
 # Static assets must resolve to real files, otherwise the screenshots below
 # render unstyled and silently "pass". Relative paths work from /data/render.
@@ -57,13 +58,18 @@ with db.session_scope() as conn:
         class_id=cid,
         today="2026-09-09",
         teacher=teacher,
+        max_photos_per_scan=8,
+        max_enrol_photos=5,
     )
 
     cases = [
         ("index.html", dict(base, active_page="dashboard", students=students,
                             stats=stats, recent=sessions[:5])),
         ("students_page.html", dict(base, active_page="students", students=students,
-                                    summary={s["id"]: s for s in summary})),
+                                    summary={s["id"]: s for s in summary},
+                                    references=db.encoding_counts(conn, cid))),
+        ("import_page.html", dict(base, active_page="students",
+                                  allow_path_import=True, max_enrol_photos=5)),
         ("records.html", dict(base, active_page="records", sessions=sessions,
                               summary=summary, stats=stats,
                               start="2026-08-01", end="2026-09-09")),
@@ -77,6 +83,11 @@ with db.session_scope() as conn:
         with open(RENDER_DIR / name, "w") as fh:
             fh.write(html)
         leaks = [t for t in FAKE if t in html]
+        assert "{{" not in html, f"{name}: an unrendered Jinja expression survived"
+        if name == "index.html":
+            # A missing context value would render as "const MAX_PHOTOS = ;"
+            # which is a syntax error that takes the whole page's JS with it.
+            assert "const MAX_PHOTOS = 8;" in html, "photo limit did not render"
         print(f"OK  {name:<22} {len(html):>6} bytes   fake-data leaks: {leaks or 'none'}")
 
     # Empty-workspace states must not crash either.
@@ -88,7 +99,7 @@ with db.session_scope() as conn:
         fh.write(h)
     print(f"OK  index.html (empty)     {len(h):>6} bytes")
 
-    h = env.get_template("students_page.html").render(**dict(empty, active_page="students", summary={}))
+    h = env.get_template("students_page.html").render(**dict(empty, active_page="students", summary={}, references={}))
     with open(RENDER_DIR / "students_empty.html", "w") as fh:
         fh.write(h)
     print(f"OK  students (empty)       {len(h):>6} bytes")
@@ -130,5 +141,34 @@ with db.session_scope() as conn:
     assert "/logout" not in h, "logged-out nav still shows a logout control"
     assert teacher["name"] not in h, "logged-out nav still shows a teacher name"
     print(f"OK  index.html (no login)  {len(h):>6} bytes")
+
+# A flashed warning used to fall through to the success branch, so a rejected
+# enrolment photo was reported with a green tick.
+warned = env.get_template("base.html").render(**dict(base, active_page=""))
+assert "bg-warn-light" in warned, "a warning flash is not styled as a warning"
+assert warned.count("check_circle") == 1, "a warning flash shows the success icon"
+print("OK  warning flashes styled distinctly")
+
+# The dashboard carries ~600 lines of inline JavaScript. A syntax error there
+# takes the whole page down while the template still "renders", so parse it.
+import re, shutil, subprocess, tempfile
+node = shutil.which("node")
+if node:
+    checked = 0
+    for name in ("index.html", "session_detail.html", "records.html",
+                 "students_page.html", "import_page.html"):
+        page = (RENDER_DIR / name).read_text()
+        for i, block in enumerate(re.findall(r"<script>(.*?)</script>", page, re.S)):
+            if not block.strip():
+                continue
+            with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+                fh.write(block)
+                path = fh.name
+            result = subprocess.run([node, "--check", path], capture_output=True, text=True)
+            assert result.returncode == 0, f"{name} script #{i}:\n{result.stderr}"
+            checked += 1
+    print(f"OK  {checked} inline script block(s) parse")
+else:
+    print("--  node not found, skipping the JavaScript syntax check")
 
 print("\nALL TEMPLATES RENDER")

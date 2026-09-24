@@ -18,9 +18,11 @@ services:
         value: "1"
       - key: PRODUCTION
         value: "1"
-      # Free tier is HTTP only — set to 0 so login cookies work.
+      # Render terminates TLS and serves *.onrender.com over HTTPS on every
+      # plan, so the login cookie can and should carry the Secure flag. Only
+      # set this to "0" if you are reaching the app over plain http.
       - key: COOKIE_SECURE
-        value: "0"
+        value: "1"
       - key: SESSION_HOURS
         value: "12"
       - key: LOGIN_RATE_LIMIT
@@ -42,6 +44,12 @@ services:
         value: "0"
       - key: GUNICORN_TIMEOUT
         value: "300"
-      # SQLite and CPU-heavy face scans are safer with one process.
+      # SQLite and CPU-heavy face scans are safer with one process. It also
+      # leaves the cores free for the scan's own worker processes.
       - key: WEB_CONCURRENCY
+        value: "1"
+      # The free tier is 0.1 CPU / 512 MB: enough to demonstrate the app, not
+      # enough for a 120-student hall photo. One worker keeps it inside the
+      # memory limit; see RECOGNITION.md for what a real class needs.
+      - key: SCAN_WORKERS
         value: "1"
