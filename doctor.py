@@ -136,6 +136,8 @@ CHECKS: list[tuple[str, str, str, bool]] = [
     ("no false claim that a compiler is needed", "recognition.py",
      "On Windows this needs Visual Studio Build Tools", False),
     ("setup checker present", "check_setup.py", "def main", True),
+    ("server prints the phone address", "netinfo.py", "def startup_banner", True),
+    ("startup warns when phones cannot reach it", "wsgi.py", "startup_banner", True),
     ("import page warns when the engine is missing", "templates/import_page.html",
      "recognition_ready", True),
 ]

@@ -180,7 +180,36 @@ for page in ("/login", "/signup"):
           "apple-mobile-web-app-capable" in html)
 
 
-print("\n7. maintenance keeps enrolled photos and removes only strays")
+print("\n7. the server tells a phone what address to use")
+import netinfo
+
+bound_local = netinfo.startup_banner("127.0.0.1", 5000)
+check(
+    "bound to localhost, it says phones cannot reach it",
+    "CANNOT reach" in bound_local and "HOST=0.0.0.0" in bound_local,
+    "the commonest cause of 'the app cannot connect' is silent otherwise",
+)
+check(
+    "and it does not offer an address that would not work",
+    "In the phone app, type" not in bound_local,
+)
+
+bound_all = netinfo.startup_banner("0.0.0.0", 5000)
+check("bound to all networks, it offers an address", "phone app" in bound_all)
+check(
+    "never 127.0.0.1 as the phone address (that means the phone itself)",
+    not any(u.startswith("http://127.") for u in netinfo.phone_urls(5000)),
+    str(netinfo.phone_urls(5000)),
+)
+check(
+    "loopback and link-local addresses are rejected",
+    not netinfo.usable("127.0.0.1") and not netinfo.usable("169.254.3.4")
+    and netinfo.usable("192.168.1.14"),
+)
+check("the firewall, the other silent cause, is mentioned", "firewall" in bound_all)
+
+
+print("\n8. maintenance keeps enrolled photos and removes only strays")
 import maintenance
 
 faces = Path(os.environ["FACES_DIR"])
