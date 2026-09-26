@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Camera check</title>
+<style>
+  :root { --bg:#f5f8fd; --card:#fff; --ink:#10204a; --muted:#5a6b8c;
+          --ok:#0a7d42; --bad:#c62828; --line:#e0e7ef; --blue:#2463eb; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--ink);
+         font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  p.sub { margin:0 0 16px; color:var(--muted); font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:14px; margin-bottom:12px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em;
+             color:var(--muted); margin:0 0 10px; }
+  .row { display:flex; gap:10px; align-items:flex-start; padding:5px 0;
+         border-bottom:1px solid var(--line); }
+  .row:last-child { border-bottom:0; }
+  .row .k { flex:1; }
+  .row .v { font-weight:600; white-space:nowrap; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .verdict { border-left:4px solid var(--blue); background:#eef4ff;
+             padding:12px 14px; border-radius:8px; margin-bottom:12px; }
+  .verdict.bad { border-left-color:var(--bad); background:#fdecea; }
+  .verdict h2 { color:var(--ink); font-size:15px; text-transform:none;
+                letter-spacing:0; margin:0 0 6px; }
+  code { background:#eef2f8; padding:1px 5px; border-radius:4px; font-size:13px;
+         word-break:break-all; }
+  button, label.btn { display:inline-flex; align-items:center; gap:8px;
+          background:var(--blue); color:#fff; border:0; border-radius:9px;
+          padding:11px 16px; font-size:15px; font-weight:600; cursor:pointer; }
+  .hidden { display:none; }
+  #result { margin-top:10px; font-size:14px; }
+  small { color:var(--muted); }
+</style>
+</head>
+<body>
+<h1>Camera check</h1>
+<p class="sub">Open this page on the phone that is having trouble.</p>
+
+<div id="verdict" class="verdict"><h2>Checking…</h2></div>
+
+<div class="card">
+  <h2>1 &middot; The files on the computer</h2>
+  <div class="row"><span class="k">Camera opens from a label</span>
+    <span class="v {{ 'ok' if facts.camera_label else 'bad' }}">{{ 'yes' if facts.camera_label else 'NO' }}</span></div>
+  <div class="row"><span class="k">Capture input present</span>
+    <span class="v {{ 'ok' if facts.capture_input else 'bad' }}">{{ 'yes' if facts.capture_input else 'NO' }}</span></div>
+  <div class="row"><span class="k">Picks camera by device</span>
+    <span class="v {{ 'ok' if facts.picker_logic else 'bad' }}">{{ 'yes' if facts.picker_logic else 'NO' }}</span></div>
+  <div class="row"><span class="k">Fast scan (threaded)</span>
+    <span class="v {{ 'ok' if facts.fast_scan else 'bad' }}">{{ 'yes' if facts.fast_scan else 'NO' }}</span></div>
+  <div class="row"><span class="k">Build</span><span class="v">{{ build }}</span></div>
+</div>
+
+<div class="card">
+  <h2>2 &middot; This phone</h2>
+  <div class="row"><span class="k">Running inside the installed app</span><span class="v" id="d-wv">…</span></div>
+  <div class="row"><span class="k">Touch screen</span><span class="v" id="d-touch">…</span></div>
+  <div class="row"><span class="k">Live camera API available</span><span class="v" id="d-media">…</span></div>
+  <div class="row"><span class="k">Secure context (https)</span><span class="v" id="d-secure">…</span></div>
+  <div class="row"><span class="k">Page served from cache</span><span class="v" id="d-sw">…</span></div>
+  <div class="row"><span class="k">Browser</span><span class="v" id="d-ua" style="white-space:normal;font-weight:400;font-size:12px">…</span></div>
+</div>
+
+<div class="card">
+  <h2>3 &middot; Try it</h2>
+  <p style="margin:0 0 10px"><small>This is the exact control the attendance page uses. Tap it and see whether your camera opens or a file list does.</small></p>
+  <label class="btn" for="diag-camera">Open camera</label>
+  <input type="file" id="diag-camera" accept="image/*" capture="environment" class="hidden"/>
+  <div id="result"></div>
+</div>
+
+<script>
+(function () {
+  var ua = navigator.userAgent;
+  // Android WebView identifies itself with "; wv)" in the token. That is the
+  // installed APK rather than Chrome, and it needs its own rebuild.
+  var isWebView = /;\s*wv\)/.test(ua) || (/Android/.test(ua) && !/Chrome\/\d/.test(ua) && !/Firefox/.test(ua));
+  var touch = false;
+  try { touch = window.matchMedia("(pointer: coarse)").matches; } catch (e) {}
+  var media = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+  function set(id, text, good) {
+    var el = document.getElementById(id);
+    el.textContent = text;
+    if (good !== undefined) el.className = "v " + (good ? "ok" : "bad");
+  }
+  set("d-wv", isWebView ? "YES - the APK" : "no - a browser");
+  set("d-touch", touch ? "yes" : "no");
+  set("d-media", media ? "yes" : "no (plain http)");
+  set("d-secure", window.isSecureContext ? "yes" : "no");
+  set("d-ua", ua);
+
+  navigator.serviceWorker && navigator.serviceWorker.getRegistrations
+    ? navigator.serviceWorker.getRegistrations().then(function (r) {
+        set("d-sw", r.length ? "a worker is installed" : "no");
+      }).catch(function () { set("d-sw", "unknown"); })
+    : set("d-sw", "no");
+
+  var filesCurrent = {{ 'true' if all_current else 'false' }};
+  var v = document.getElementById("verdict");
+  var title, body;
+
+  if (!filesCurrent) {
+    v.className = "verdict bad";
+    title = "The files on your computer are out of date";
+    body = "Section 1 has a NO in it, so the server is serving an older copy of "
+         + "the app. Download the ZIP from GitHub again, copy your "
+         + "<code>instance</code> and <code>faces</code> folders across, and "
+         + "restart <code>run-phone.bat</code>. Nothing on the phone can fix this.";
+  } else if (isWebView) {
+    v.className = "verdict bad";
+    title = "You are in the installed app, and it needs rebuilding";
+    body = "The computer's files are current, but the APK on this phone is an "
+         + "older build. A WebView ignores the camera attribute unless the app's "
+         + "own Java handles it, which older APKs do not. Either open "
+         + "<code>http://&lt;your-ip&gt;:5000</code> in Chrome instead, or build "
+         + "and install a fresh APK (GitHub &rarr; Actions &rarr; build apk).";
+  } else {
+    title = "Files current, and you are in a browser";
+    body = "Tap <b>Open camera</b> in section 3. If your camera opens, the app "
+         + "will work too and the page you had open was cached - close every tab "
+         + "for this site and open it again. If a file list opens instead, tell "
+         + "me what this whole page says and I will have what I need.";
+  }
+  v.innerHTML = "<h2>" + title + "</h2><div>" + body + "</div>";
+
+  var input = document.getElementById("diag-camera");
+  input.addEventListener("change", function () {
+    var f = input.files && input.files[0];
+    document.getElementById("result").innerHTML = f
+      ? "<b class='ok'>Got a photo:</b> " + f.name + " &middot; "
+        + Math.round(f.size / 1024) + " KB"
+      : "<b class='bad'>Nothing came back.</b>";
+  });
+})();
+</script>
+</body>
+</html>

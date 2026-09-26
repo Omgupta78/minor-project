@@ -147,6 +147,9 @@ PUBLIC_ENDPOINTS = {
     # these to the login page makes the install prompt never appear, with no
     # error to explain why.
     "manifest", "service_worker", "offline", "favicon",
+    # Diagnostics must work before login, because "I cannot use the app" is
+    # exactly when they are needed.
+    "diag",
 }
 
 
@@ -322,6 +325,40 @@ def offline():
 @app.get("/favicon.ico")
 def favicon():
     return send_from_directory(BASE_DIR / "static" / "icons", "favicon.ico")
+
+
+@app.get("/diag")
+def diag():
+    """"Why is the camera not working on my phone?" answered with facts.
+
+    Two rounds of this were lost to guessing, because three different things
+    produce the identical symptom -- tapping Use Camera opens a file picker --
+    and none of them can be told apart by looking at the phone:
+
+      * the files on the server are an older download;
+      * the files are current but the phone is showing a cached page;
+      * the phone is in the installed APK, whose WebView needs its own fix and
+        therefore its own rebuild.
+
+    So the server reports what is actually in its own templates, the page
+    reports what the browser actually is, and the two together name the cause.
+    Public on purpose: it has to be reachable before anyone logs in, and it
+    exposes nothing but its own version.
+    """
+    template = (BASE_DIR / "templates" / "index.html").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    recog = (BASE_DIR / "recognition.py").read_text(encoding="utf-8", errors="replace")
+    facts = {
+        # The label is the fix. Without it the camera button is a scripted
+        # click, which Android answers with the file chooser.
+        "camera_label": 'for="camera-input"' in template,
+        "capture_input": 'capture="environment"' in template,
+        "picker_logic": "pickCameraControl" in template,
+        "fast_scan": "_thread_detector" in recog,
+    }
+    return render_template("diag.html", build=BUILD, facts=facts,
+                           all_current=all(facts.values()))
 
 
 @app.get("/healthz")
