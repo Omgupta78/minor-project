@@ -280,7 +280,7 @@
 const CLASS_ID = {{ class_id or 'null' }};
 const MAX_PHOTOS = {{ max_photos_per_scan|default(8) }};
 
-/* photos = [{ file, dataUrl, width, height, faces }] */
+/* photos = [{ file, previewUrl, width, height, faces, previewFailed }] */
 let photos = [];
 let activePhoto = 0;
 let mediaStream = null, lastScan = null;
@@ -338,25 +338,67 @@ function addFiles(files) {
     alert("Only " + room + " more photo(s) can be added — the rest were ignored.");
     files = files.slice(0, room);
   }
-  let pending = files.length;
-  files.forEach(file => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const img = new Image();
-      img.onload = () => {
-        photos.push({ file, dataUrl: e.target.result, width: img.width, height: img.height, faces: [] });
-        if (--pending === 0) { activePhoto = photos.length - 1; refreshPhotoUI(); }
-      };
-      img.onerror = () => { if (--pending === 0) refreshPhotoUI(); };
-      img.src = e.target.result;
-    };
-    reader.onerror = () => { if (--pending === 0) refreshPhotoUI(); };
-    reader.readAsDataURL(file);
+  /* Every chosen photo is queued immediately, in order, and the preview
+     catches up afterwards.
+
+     A photo used to be added only from inside img.onload, so any file the
+     browser could not decode into an <img> was thrown away without a word.
+     That is every HEIC photo on Android -- Chrome there cannot render HEIC at
+     all -- and any photo large enough to exhaust memory once readAsDataURL
+     had turned it into a base64 string several times its size. It presented
+     as "I tap upload and nothing happens", and only on a phone, because a
+     laptop decodes both without complaint.
+
+     The preview was never meant to be the gatekeeper. The server decodes HEIC
+     properly through pillow-heif, and it is the server that does the
+     recognising, so a photo the browser cannot draw is still a photo worth
+     scanning. It is queued with a placeholder instead. */
+  const added = files.map(file => {
+    const photo = { file, previewUrl: null, width: 0, height: 0, faces: [],
+                    previewFailed: false };
+    photos.push(photo);
+    return photo;
   });
+  activePhoto = photos.length - 1;
+  refreshPhotoUI();
+
+  added.forEach(photo => {
+    let url = null;
+    try {
+      // An object URL points at the file; readAsDataURL copied it into a
+      // base64 string in memory first, which is what a phone ran out of.
+      url = URL.createObjectURL(photo.file);
+    } catch (err) {
+      photo.previewFailed = true;
+      refreshPhotoUI();
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      photo.previewUrl = url;
+      photo.width = img.width;
+      photo.height = img.height;
+      refreshPhotoUI();
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      photo.previewFailed = true;   // still queued, still scanned
+      refreshPhotoUI();
+    };
+    img.src = url;
+  });
+}
+
+function releasePreview(photo) {
+  if (photo && photo.previewUrl) {
+    URL.revokeObjectURL(photo.previewUrl);
+    photo.previewUrl = null;
+  }
 }
 
 function removePhoto(i, ev) {
   if (ev) ev.stopPropagation();
+  releasePreview(photos[i]);
   photos.splice(i, 1);
   if (activePhoto >= photos.length) activePhoto = Math.max(0, photos.length - 1);
   // Boxes belong to the old numbering, so a re-scan is required.
@@ -391,7 +433,12 @@ function refreshPhotoUI() {
     return `
     <button type="button" onclick="selectPhoto(${i})"
       class="relative flex-shrink-0 w-20 h-16 rounded-lg overflow-hidden border-2 transition-colors ${i === activePhoto ? 'border-primary' : 'border-bdr hover:border-primary/50'}">
-      <img src="${p.dataUrl}" alt="Photo ${i + 1}" class="w-full h-full object-cover"/>
+      ${p.previewUrl
+        ? `<img src="${p.previewUrl}" alt="Photo ${i + 1}" class="w-full h-full object-cover"/>`
+        : `<span class="w-full h-full flex flex-col items-center justify-center bg-slate-100 text-txt-f gap-0.5">
+             <span class="material-symbols-outlined text-[18px]">image</span>
+             <span class="text-[8px] leading-none px-1 text-center">${p.previewFailed ? "no preview" : "loading"}</span>
+           </span>`}
       <span class="absolute top-0 left-0 bg-black/70 text-white text-[9px] font-mono px-1">${i + 1}</span>
       <span onclick="removePhoto(${i}, event)" role="button" aria-label="Remove photo ${i + 1}"
             class="absolute top-0 right-0 bg-danger text-white w-4 h-4 flex items-center justify-center text-[10px] leading-none">×</span>
@@ -405,10 +452,15 @@ function refreshPhotoUI() {
 function selectPhoto(i) { activePhoto = i; refreshPhotoUI(); }
 
 function resetScan() {
+  // An object URL pins the file in memory until it is revoked, which matters
+  // on a phone holding several 12 MP photos.
+  photos.forEach(releasePreview);
   photos = []; activePhoto = 0; lastScan = null;
   document.getElementById("confirm-btn").disabled = true;
   document.getElementById("scan-stats").style.display = "none";
   document.getElementById("file-input").value = "";
+  const cam = document.getElementById("camera-input");
+  if (cam) cam.value = "";
   roster.forEach(s => { s.status = "absent"; s.confidence = null; s.manual = false; s.note = ""; s.photo = null; });
   document.getElementById("review-list").innerHTML =
     '<div class="text-center text-txt-f text-xs py-12 px-4">Scan your class photos and every student will appear here for you to check.</div>';
@@ -632,6 +684,33 @@ function drawPhoto() {
   if (!p) return;
   const canvas = document.getElementById("preview-canvas");
   const ctx = canvas.getContext("2d");
+
+  if (!p.previewUrl) {
+    // No preview does not mean no photo: a HEIC from a phone scans perfectly
+    // well, the browser just cannot draw it. Say so rather than showing an
+    // empty frame that looks like the upload failed.
+    canvas.width = 640; canvas.height = 360;
+    ctx.fillStyle = "#0f172a"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#94a3b8";
+    ctx.textAlign = "center";
+    ctx.font = "600 22px system-ui, sans-serif";
+    ctx.fillText(p.previewFailed ? "Preview not available" : "Loading preview…",
+                 canvas.width / 2, canvas.height / 2 - 12);
+    ctx.font = "15px system-ui, sans-serif";
+    if (p.previewFailed) {
+      ctx.fillText("This photo will still be scanned.",
+                   canvas.width / 2, canvas.height / 2 + 16);
+      const name = p.file && p.file.name ? p.file.name : "";
+      if (name) {
+        ctx.font = "13px monospace";
+        ctx.fillStyle = "#64748b";
+        ctx.fillText(name.slice(0, 44), canvas.width / 2, canvas.height / 2 + 44);
+      }
+    }
+    ctx.textAlign = "start";
+    return;
+  }
+
   const img = new Image();
   img.onload = () => {
     canvas.width = img.width; canvas.height = img.height;
@@ -666,7 +745,7 @@ function drawPhoto() {
       ctx.fillText(label, f.left + 6, f.bottom + fs + 3);
     });
   };
-  img.src = p.dataUrl;
+  img.src = p.previewUrl;
 }
 
 /* ---------- review ----------
