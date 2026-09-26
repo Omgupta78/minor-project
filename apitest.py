@@ -279,7 +279,28 @@ if android.exists():
         )
 
 
-print("\n9. maintenance keeps enrolled photos and removes only strays")
+print("\n9. /diag answers 'why is the camera not working' with facts")
+d = anon.get("/diag")
+check("it is reachable without signing in", d.status_code == 200, str(d.status_code))
+body = d.get_data(as_text=True)
+check(
+    "it reports what the server's own template contains",
+    "Camera opens from a label" in body and "Capture input present" in body,
+    "otherwise an old download and a cached page look identical",
+)
+check(
+    "it tells the APK apart from a browser",
+    "wv" in body and "the APK" in body,
+    "a WebView needs a rebuilt app, not a re-download -- different cure",
+)
+check(
+    "it offers the real control to try",
+    'capture="environment"' in body and 'for="diag-camera"' in body,
+)
+check("it names the build", flask_app.BUILD.split(" ")[0] in body)
+
+
+print("\n10. maintenance keeps enrolled photos and removes only strays")
 import maintenance
 
 faces = Path(os.environ["FACES_DIR"])
