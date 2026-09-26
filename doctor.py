@@ -164,6 +164,18 @@ def gallery_picker_keeps_multi_select(content: str) -> bool:
     )
 
 
+def camera_opens_by_label(content: str) -> bool:
+    """The camera control must be a <label>, not a scripted .click().
+
+    Android browsers drop `capture` when a hidden file input is clicked from
+    script, and fall back to the ordinary file chooser -- which is what "Use
+    Camera asks me to upload a photo" was. A label pointing at the input is
+    the mechanism the gallery picker has always used, and it works.
+    """
+    labels = re.findall(r"<label[^>]*>", content)
+    return any('for="camera-input"' in tag for tag in labels)
+
+
 def camera_has_a_plain_http_fallback(content: str) -> bool:
     has_input = any(
         'id="camera-input"' in tag and "capture=" in tag
@@ -180,6 +192,8 @@ LOGIC_CHECKS: list[tuple[str, str, Callable[[str], bool]]] = [
      gallery_picker_keeps_multi_select),
     ("camera works over plain http", "templates/index.html",
      camera_has_a_plain_http_fallback),
+    ("the camera opens from a label, not a scripted click", "templates/index.html",
+     camera_opens_by_label),
 ]
 
 

@@ -93,7 +93,21 @@
               <label for="file-input" class="bg-primary hover:bg-blue-700 text-white font-medium text-sm px-5 py-2.5 rounded-lg cursor-pointer flex items-center gap-2 transition-colors shadow-sm">
                 <span class="material-symbols-outlined text-[18px]">upload</span>Upload Photos
               </label>
-              <button type="button" onclick="openCamera()" class="bg-white border border-bdr text-txt-m text-sm px-5 py-2.5 rounded-lg flex items-center gap-2 hover:border-primary hover:text-primary transition-colors shadow-sm">
+              <!-- Two controls, one of which is hidden on load by pickCameraControl().
+                   They look identical; the difference is how the camera opens.
+
+                   The label is the one a phone gets. Pointing a <label> at the
+                   capture input is the only reliable way to open a phone's
+                   camera: calling .click() on a hidden file input from script
+                   makes Android browsers drop the `capture` attribute and show
+                   the ordinary file chooser instead, which is what "Use Camera
+                   asks me to upload a photo" turns out to be. The gallery
+                   button beside it has always used a label, and has always
+                   worked -- that asymmetry was the bug. -->
+              <label for="camera-input" id="camera-label" class="bg-white border border-bdr text-txt-m text-sm px-5 py-2.5 rounded-lg cursor-pointer flex items-center gap-2 hover:border-primary hover:text-primary transition-colors shadow-sm">
+                <span class="material-symbols-outlined text-[18px]">camera_alt</span>Use Camera
+              </label>
+              <button type="button" id="camera-button" onclick="openCamera()" class="hidden bg-white border border-bdr text-txt-m text-sm px-5 py-2.5 rounded-lg items-center gap-2 hover:border-primary hover:text-primary transition-colors shadow-sm">
                 <span class="material-symbols-outlined text-[18px]">camera_alt</span>Use Camera
               </button>
             </div>
@@ -439,6 +453,40 @@ function liveCameraAvailable() {
   return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 }
 
+/* Should this device use its own camera app rather than a viewfinder in the
+   page? Yes on a phone, for two independent reasons:
+
+     - over plain http navigator.mediaDevices does not exist at all, so there
+       is no viewfinder to offer;
+     - even where there is one, the camera app shoots at the full sensor while
+       getUserMedia hands back a video frame. In a hall of 120 that is a ~60px
+       back-row face against a ~16px one, and 45px is the floor for
+       identification (RECOGNITION.md).
+
+   `pointer: coarse` is true for touch screens and false for a mouse, which is
+   the distinction that matters here. */
+function prefersNativeCamera() {
+  if (!liveCameraAvailable()) return true;
+  try {
+    return window.matchMedia("(pointer: coarse)").matches;
+  } catch (err) {
+    return false;
+  }
+}
+
+/* Show the label or the button, never both. The label opens the phone camera
+   through the capture input; the button opens the in-page viewfinder. */
+function pickCameraControl() {
+  const label = document.getElementById("camera-label");
+  const button = document.getElementById("camera-button");
+  if (!label || !button) return;
+  const native = prefersNativeCamera();
+  label.classList.toggle("hidden", !native);
+  label.classList.toggle("flex", native);
+  button.classList.toggle("hidden", native);
+  button.classList.toggle("flex", !native);
+}
+
 function useNativeCamera() {
   document.getElementById("camera-input").click();
 }
@@ -772,5 +820,9 @@ async function confirmSession() {
 }
 
 if (roster.length) renderReview();
+// Runs at parse time, after the controls exist: the script tag sits at the
+// end of the body, so there is no DOMContentLoaded to wait for and no flash
+// of the wrong button.
+pickCameraControl();
 </script>
 {% endblock %}
