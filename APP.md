@@ -40,6 +40,21 @@ Or use the Android app below, which has no such restriction.
 
 ### Taking the photo
 
+**Use Camera opens your phone's own camera app**, not a viewfinder inside the
+page, and the photo comes back into the page when you accept it. On a laptop
+with a mouse you get the in-page viewfinder instead; the page picks by whether
+the device has a touch screen.
+
+That is deliberate, not a fallback. See the resolution table below.
+
+> If Use Camera ever offers a file chooser instead of the camera, the build is
+> older than this one. The control has to be a `<label>` pointing at the
+> capture input -- opening that input from script makes Android browsers drop
+> `capture` and show the ordinary file picker. `cameratest.py` drives a real
+> browser to check it, and `doctor.py` fails the build if the label is gone.
+
+
+
 Over plain http — which is what `http://192.168.1.14:5000` is — the browser
 refuses `getUserMedia` outright: live camera access is allowed only from https
 or from localhost. So **Use Camera** does not open a viewfinder inside the

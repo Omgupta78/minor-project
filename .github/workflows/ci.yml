@@ -42,6 +42,11 @@ jobs:
         run: python rendertest.py
       - name: Calibration tests
         run: python calibrationtest.py
+      - name: Browser checks (camera control)
+        run: |
+          python -m pip install --quiet playwright
+          python -m playwright install --with-deps chromium
+          python cameratest.py
       - name: Build inventory checks
         run: python doctor.py
       - name: Security middleware tests
