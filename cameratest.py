@@ -1,4 +1,7 @@
-"""Drive the real page in a browser: does "Use Camera" open the camera?
+"""Drive the real page in a browser: do the phone's two photo paths work?
+
+Both of the phone's ways of getting a photo in have failed in ways that were
+invisible from the source, so both are checked here against a real browser.
 
 Reported from a phone on the classroom Wi-Fi: tapping Use Camera offered a
 file upload instead of the camera, while the same page on the laptop was
@@ -124,6 +127,65 @@ with sync_playwright() as pw:
         check("Upload Photos is still multi-select",
               page.get_attribute("#file-input", "multiple") is not None
               and page.get_attribute("#file-input", "capture") is None)
+
+        # ---- a photo the browser cannot decode must still be queued ----
+        # Reported from a phone: "on uploading photo no photo is uploading".
+        # A photo used to be added only from inside img.onload, so a HEIC --
+        # which Chrome on Android cannot render at all -- was dropped in
+        # silence. The server reads HEIC perfectly well, so the preview must
+        # never decide whether a photo counts.
+        page.set_input_files("#file-input", files=[{
+            "name": "classroom.heic", "mimeType": "image/heic",
+            # Real HEIC magic, no decodable payload: a browser will refuse it
+            # exactly as it refuses a phone's own HEIC.
+            "buffer": b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" + b"\x00" * 256,
+        }])
+        page.wait_for_timeout(700)
+        queued = page.evaluate("photos.length")
+        check("an undecodable photo is still queued", queued == 1, f"photos.length={queued}")
+        check("the scan button becomes usable",
+              not page.is_disabled("#scan-btn"), "the teacher could not scan it")
+        check("the thumbnail says there is no preview",
+              "no preview" in (page.inner_text("#thumb-strip") or "").lower(),
+              page.inner_text("#thumb-strip"))
+        check("the file itself is kept for upload",
+              page.evaluate("photos[0].file && photos[0].file.name") == "classroom.heic")
+
+        # and it really does reach the server
+        sent = {}
+
+        def capture(route):
+            req = route.request
+            sent["body"] = req.post_data_buffer or (req.post_data or "").encode()
+            route.fulfill(status=200, content_type="application/json",
+                          body='{"error": "intercepted"}')
+
+        page.route("**/api/scan", capture)
+        page.click("#scan-btn")
+        page.wait_for_timeout(800)
+        page.unroute("**/api/scan")
+        body = sent.get("body", b"")
+        check("scanning actually sends that photo",
+              b"classroom.heic" in body,
+              f"{len(body)} bytes posted: {body[:120]!r}")
+
+        # a decodable photo still previews normally
+        page.evaluate("resetScan()")
+        png = bytes.fromhex(
+            "89504e470d0a1a0a0000000d494844520000000400000004080200000026930929"
+            "0000001449444154789c633c2127c700034c0c48003707003476010caf6ab9b500"
+            "00000049454e44ae426082")
+        page.set_input_files("#file-input", files=[{
+            "name": "front.png", "mimeType": "image/png", "buffer": png}])
+        page.wait_for_timeout(700)
+        check("a normal photo still previews",
+              page.evaluate("!!(photos[0] && photos[0].previewUrl)"))
+        check("and its size is read",
+              page.evaluate("photos[0] && photos[0].width") == 4,
+              str(page.evaluate("photos[0] && photos[0].width")))
+        check("the preview is an object URL, not a base64 copy",
+              str(page.evaluate("photos[0].previewUrl")).startswith("blob:"),
+              "data URLs exhaust memory on a phone holding 12MP photos")
         ctx.close()
     browser.close()
 

@@ -186,6 +186,34 @@ def camera_has_a_plain_http_fallback(content: str) -> bool:
     return has_input and "liveCameraAvailable()" in content
 
 
+def upload_survives_an_undecodable_photo(content: str) -> bool:
+    """A queued photo must not depend on the browser decoding it.
+
+    Photos used to be added only from inside img.onload, so anything the
+    browser could not draw was dropped without a word -- every HEIC on
+    Android, and any photo big enough to exhaust memory as a base64 data URL.
+    It looked like "I tap upload and nothing happens", and only on a phone.
+    """
+    # The comments here discuss readAsDataURL and img.onload at length --
+    # they are the whole point of the change -- so read the code alone.
+    body = content.split("function addFiles")[-1].split("\nfunction ")[0]
+    body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+    body = re.sub(r"^\s*//.*$", "", body, flags=re.M)
+
+    if "readAsDataURL" in body:
+        return False                      # the base64 copy a phone runs out of
+    if "createObjectURL" not in body:
+        return False
+
+    push = body.find("photos.push")
+    onload = body.find("img.onload")
+    if push < 0:
+        return False
+    # The photo is queued before any decode is attempted, so a decode that
+    # never succeeds cannot lose it.
+    return onload < 0 or push < onload
+
+
 # (label, file, predicate over the file's text)
 LOGIC_CHECKS: list[tuple[str, str, Callable[[str], bool]]] = [
     ("gallery picker keeps multi-select", "templates/index.html",
@@ -194,6 +222,8 @@ LOGIC_CHECKS: list[tuple[str, str, Callable[[str], bool]]] = [
      camera_has_a_plain_http_fallback),
     ("the camera opens from a label, not a scripted click", "templates/index.html",
      camera_opens_by_label),
+    ("an undecodable photo is still uploaded", "templates/index.html",
+     upload_survives_an_undecodable_photo),
 ]
 
 
