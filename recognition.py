@@ -18,8 +18,10 @@ Key behaviours
 """
 from __future__ import annotations
 
+import atexit
 import io
 import os
+import threading
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional, Sequence
@@ -88,9 +90,29 @@ READABLE_FACE_PX = int(os.environ.get("READABLE_FACE_PX", "45"))
 UPSCALE_FACE_PX = int(os.environ.get("UPSCALE_FACE_PX", "150"))
 MAX_UPSCALE = float(os.environ.get("MAX_UPSCALE", "4.0"))
 CROP_MARGIN = float(os.environ.get("CROP_MARGIN", "0.45"))
-# A few jittered passes average out the noise in an enlarged crop. Only paid
-# on small faces, so a front-row-only photo scans at the usual speed.
-SMALL_FACE_JITTERS = int(os.environ.get("SMALL_FACE_JITTERS", "2"))
+# Jittered passes over an enlarged crop, meant to average out its noise. The
+# default was 2 on the theory that averaging helps a far face. Measured on the
+# 120-student hall against ground truth, the honest summary is that it buys
+# confidence, not correctness:
+#
+#                 scan      found   auto-accepted   sent to review   wrong names
+#     jitters=1   8.0 s   100/120              90               10             0
+#     jitters=2  10.9 s   100/120              97                3             0
+#
+# The same 100 students, and no misidentification either way. Averaging two
+# passes pulls the distances in slightly, so seven more faces land inside the
+# auto-accept band instead of the review band.
+#
+# One pass is the default because it is 28% faster and, since dlib only applies
+# its random transform when asked for more than one pass, exactly repeatable --
+# rescanning a photo returns the identical register, which two passes cannot
+# promise (they wobbled between 97 and 101 auto-accepts across nine runs).
+#
+# The cost is real and it is seven extra confirmation taps on a 120-student
+# hall. A teacher who would rather have them back can set SMALL_FACE_JITTERS=2
+# and pay three seconds for it. Do not raise it blind: measure first, because
+# the intuition that more jitter finds more students is wrong.
+SMALL_FACE_JITTERS = int(os.environ.get("SMALL_FACE_JITTERS", "1"))
 # Distant faces are noisier, so their best distance sits slightly higher even
 # when the identification is right. Rather than loosening the match threshold
 # (which would invent matches), widen only the review band: a far student is
@@ -124,9 +146,19 @@ MATCH_MARGIN = float(os.environ.get("MATCH_MARGIN", "0.06"))
 SMALL_FACE_PENALTY = float(os.environ.get("SMALL_FACE_PENALTY", "0.0"))
 
 # How many faces must be waiting before it is worth starting worker processes.
-# dlib holds the GIL, so threads give no speedup at all (measured 1.02x); only
-# separate processes help. Starting the pool costs about 1.4 s, so a small
-# class is quicker left alone.
+#
+# Encoding must use processes, and the reason is sharper than "dlib holds the
+# GIL". Threads here do not merely fail to help, they crash: running
+# face_encodings concurrently segfaults the interpreter, reproducibly, once
+# enough faces are in flight. 16 jobs over 2 threads survived every time; 118
+# jobs over 4 threads died 3 times out of 3. The descriptor model carries
+# per-call state that is not safe to share, so each concurrent caller needs
+# its own address space.
+#
+# Detection is the opposite and is threaded instead -- see DETECT_THREADS.
+# Do not "simplify" the two into one mechanism.
+#
+# Starting the pool costs about 2.4 s, so a small class is quicker left alone.
 PARALLEL_MIN_FACES = int(os.environ.get("PARALLEL_MIN_FACES", "24"))
 # 0 = choose automatically, 1 = never parallelise, N = exactly N workers.
 # Each worker loads its own copy of the dlib models, about 250 MB resident, so
@@ -141,6 +173,24 @@ SCAN_WORKERS = int(os.environ.get("SCAN_WORKERS", "0"))
 # camera photo never pays for it.
 RESCUE_MODE = os.environ.get("RESCUE_PASS", "auto").strip().lower()
 RESCUE_UPSCALE = float(os.environ.get("RESCUE_UPSCALE", "2.0"))
+
+# Detection threads. A hall photo is split into a dozen or more tiles and each
+# is searched independently, which was the single largest cost in a scan:
+# 9.7 s of an 18.4 s scan, all of it on one core.
+#
+# Threads, not processes, because dlib's HOG detector releases the GIL for the
+# whole search. Measured on the 120-student hall, tiled detection went from
+# 9.7 s to 3.8 s, a 2.5x speedup on 4 cores, and threads cost nothing to start
+# and never pickle the 12 MP image -- so unlike the encoding pool there is no
+# minimum size below which they stop paying.
+#
+# Two things had to be true before that was safe, and each failed differently:
+# every thread needs its OWN dlib detector (see _thread_detector) and its own
+# contiguous copy of the tile (see _detect_window). Read both before changing
+# anything here.
+#
+# 0 = choose automatically, 1 = never thread, N = exactly N threads.
+DETECT_THREADS = int(os.environ.get("DETECT_THREADS", "0"))
 
 # iPhones and recent Android phones shoot HEIC by default, so every layer of
 # the pipeline has to accept it: the upload form, the folder enrolment scan,
@@ -458,22 +508,124 @@ def merge_boxes(boxes: Sequence[tuple], threshold: float = 0.4) -> list[tuple]:
     return sorted(kept, key=lambda b: (b[0], b[3]))
 
 
+def detect_thread_count(tiles: int) -> int:
+    """How many threads to search `tiles` tiles with. 1 means stay serial."""
+    if DETECT_THREADS == 1 or tiles < 2:
+        return 1
+    if DETECT_THREADS > 1:
+        return min(DETECT_THREADS, tiles)
+    cpus = os.cpu_count() or 1
+    if cpus < 2:
+        return 1
+    return max(1, min(4, cpus, tiles))
+
+
+_detector_local = threading.local()
+
+
+def _thread_detector():
+    """A dlib HOG detector belonging to this thread alone, or None.
+
+    face_recognition keeps ONE detector at module scope and every caller
+    shares it. That object cannot be called from several threads at once: on
+    the 120-student hall it segfaulted the interpreter in 11 runs out of 12,
+    whether the tiles were views or copies. Giving each thread its own
+    detector fixes it completely -- 8 runs out of 8, and every run since.
+    """
+    if DETECTION_MODEL != "hog":
+        return None  # the CNN path keeps face_recognition's own model
+    # Only when the real library is in use. The test suites swap _fr for a
+    # stub and count the tiles it is handed; reaching past it to dlib would
+    # make detection untestable, and did -- the stub saw 0 tiles of 6.
+    if getattr(_fr(), "__name__", "") != "face_recognition":
+        return None
+    detector = getattr(_detector_local, "detector", None)
+    if detector is None:
+        try:
+            import dlib
+
+            detector = dlib.get_frontal_face_detector()
+        except Exception:
+            return None
+        _detector_local.detector = detector
+    return detector
+
+
+def _detect_window(args: tuple, threaded: bool = False) -> list[tuple]:
+    """Search one tile, returning boxes in whole-image coordinates."""
+    image, x, y, window_w, window_h = args
+    crop = image[y : y + window_h, x : x + window_w]
+
+    detector = _thread_detector() if threaded else None
+    if detector is not None:
+        # A tile cut out of a larger photo is a non-contiguous view, and dlib
+        # reads one of those wrongly when several threads do it at once: the
+        # detector returned 153 boxes instead of 197 on the hall photo,
+        # reproducibly, and every box it dropped was a ~36 px back-row face.
+        # It does not crash and it does not complain, which makes it far worse
+        # than the segfault above. One contiguous copy per tile costs 4 MB and
+        # restores the count to exactly the serial result.
+        crop = np.ascontiguousarray(crop)
+        rows, cols = crop.shape[:2]
+        # Clamp to the tile, exactly as face_recognition's own
+        # _trim_css_to_bounds does. dlib will happily return a box that runs
+        # off the edge of the image, and without this the threaded path
+        # disagreed with the serial one on every face touching a tile border.
+        found = [
+            (max(r.top(), 0), min(r.right(), cols), min(r.bottom(), rows), max(r.left(), 0))
+            for r in detector(crop, UPSAMPLE)
+        ]
+    else:
+        fr = _fr()
+        try:
+            found = fr.face_locations(
+                crop, number_of_times_to_upsample=UPSAMPLE, model=DETECTION_MODEL
+            )
+        except TypeError:  # a stub or an older signature
+            found = fr.face_locations(crop)
+
+    return [(top + y, right + x, bottom + y, left + x) for top, right, bottom, left in found]
+
+
 def detect_tiled(
     rgb: np.ndarray,
     tile: Optional[int] = None,
     overlap: Optional[int] = None,
 ) -> list[tuple]:
-    """Detect faces tile by tile at full resolution, in whole-image coords."""
-    fr = _fr()
+    """Detect faces tile by tile at full resolution, in whole-image coords.
+
+    The tiles are searched in threads: dlib releases the GIL inside the HOG
+    detector, and threads share memory so the 12 MP image is never pickled,
+    which is what makes this cheaper than the process pool encoding needs.
+    Measured 2.5x on 4 cores, and verified to return exactly the boxes the
+    serial path returns -- see halltest.py.
+    """
     image = np.asarray(rgb)
     height, width = image.shape[:2]
+    windows = tile_windows(height, width, tile, overlap)
+    jobs = [(image, x, y, w, h) for x, y, w, h in windows]
+
+    threads = detect_thread_count(len(jobs))
+    # Threading needs a real per-thread dlib detector. Without one -- the CNN
+    # model, or the stub the test suites install -- stay serial rather than
+    # share an object that cannot take it.
+    if threads > 1 and _thread_detector() is not None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        try:
+            with ThreadPoolExecutor(max_workers=threads) as pool:
+                results = list(
+                    pool.map(lambda job: _detect_window(job, threaded=True), jobs)
+                )
+        except Exception as exc:  # a restricted host may forbid threads
+            print(f"  [scan] threaded detection unavailable ({exc}); using one thread")
+            results = [_detect_window(job) for job in jobs]
+    else:
+        results = [_detect_window(job) for job in jobs]
+
     found: list[tuple] = []
-    for x, y, window_w, window_h in tile_windows(height, width, tile, overlap):
-        crop = image[y : y + window_h, x : x + window_w]
-        for top, right, bottom, left in fr.face_locations(
-            crop, number_of_times_to_upsample=UPSAMPLE, model=DETECTION_MODEL
-        ):
-            found.append((top + y, right + x, bottom + y, left + x))
+    for boxes in results:
+        found.extend(boxes)
     return merge_boxes(found)
 
 
@@ -635,17 +787,69 @@ def main_module_is_guarded() -> bool:
     return '__name__ == "__main__"' in source or "__name__ == '__main__'" in source
 
 
-def _encode_jobs_parallel(jobs: list, workers: int) -> Optional[list]:
-    """Encode prepared crops across processes. None means 'could not'.
+# The encoding pool, kept warm between scans.
+#
+# Each worker imports dlib and loads its models, which is why starting the
+# pool costs about 2.4 s. Building one per photo threw that away every time:
+# measured on the 120-student hall, a cold pool ran the encode in 7.84 s and a
+# warm one in 6.35 s, and a teacher scanning three photos of the room paid the
+# startup three times over.
+#
+# Guarded by a lock because gunicorn serves requests on threads and two
+# simultaneous scans must not each build a pool.
+_POOL = None
+_POOL_WORKERS = 0
+_POOL_LOCK = threading.Lock()
+
+
+def _shutdown_pool() -> None:
+    global _POOL, _POOL_WORKERS
+    with _POOL_LOCK:
+        pool, _POOL, _POOL_WORKERS = _POOL, None, 0
+    if pool is not None:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+
+
+def _encoding_pool(workers: int):
+    """The shared pool, started on first use. None means 'cannot'.
 
     forkserver, not the default fork: gunicorn runs threaded workers by
-    default and forking a threaded process can deadlock in the child. spawn
-    is the fallback for platforms without forkserver. Both cost about 1.4 s
-    to start, which a 120-face photo repays many times over.
+    default and forking a threaded process can deadlock in the child. spawn is
+    the fallback for platforms without forkserver.
     """
+    global _POOL, _POOL_WORKERS
     import multiprocessing
     from concurrent.futures import ProcessPoolExecutor
 
+    with _POOL_LOCK:
+        if _POOL is not None and _POOL_WORKERS >= workers:
+            return _POOL
+        if _POOL is not None:
+            # A later scan wants more workers than the pool was built with.
+            try:
+                _POOL.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+            _POOL = None
+
+        methods = multiprocessing.get_all_start_methods()
+        method = "forkserver" if "forkserver" in methods else "spawn"
+        try:
+            context = multiprocessing.get_context(method)
+            _POOL = ProcessPoolExecutor(max_workers=workers, mp_context=context)
+            _POOL_WORKERS = workers
+            atexit.register(_shutdown_pool)
+        except Exception as exc:  # pragma: no cover - platform dependent
+            print(f"  [scan] parallel encoding unavailable ({exc}); using one process")
+            _POOL, _POOL_WORKERS = None, 0
+        return _POOL
+
+
+def _encode_jobs_parallel(jobs: list, workers: int) -> Optional[list]:
+    """Encode prepared crops across processes. None means 'could not'."""
     if not main_module_is_guarded():
         print(
             "  [scan] the calling script has no `if __name__ == \"__main__\":` "
@@ -653,16 +857,21 @@ def _encode_jobs_parallel(jobs: list, workers: int) -> Optional[list]:
         )
         return None
 
-    methods = multiprocessing.get_all_start_methods()
-    method = "forkserver" if "forkserver" in methods else "spawn"
+    pool = _encoding_pool(workers)
+    if pool is None:
+        return None
     try:
-        context = multiprocessing.get_context(method)
-        with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
-            return list(pool.map(_encode_prepared_worker, jobs, chunksize=4))
+        # chunksize=1: the faces differ in size by several times, so handing
+        # them out one at a time keeps every core busy to the end. Measured
+        # slightly ahead of chunksize=4 (6.35 s against 6.62 s).
+        return list(pool.map(_encode_prepared_worker, jobs, chunksize=1))
     except Exception as exc:  # pragma: no cover - platform dependent
-        # A restricted container may forbid new processes. Losing the speedup
-        # is acceptable; failing the teacher's scan is not.
-        print(f"  [scan] parallel encoding unavailable ({exc}); using one process")
+        # A worker died, or the host forbids new processes. Losing the
+        # speedup is acceptable; failing the teacher's scan is not. Drop the
+        # pool so the next scan builds a fresh one rather than reusing a
+        # broken one.
+        print(f"  [scan] parallel encoding failed ({exc}); using one process")
+        _shutdown_pool()
         return None
 
 

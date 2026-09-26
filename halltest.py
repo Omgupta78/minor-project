@@ -348,6 +348,84 @@ check(
     all(0.0 <= s["percent"] <= 100.0 for s in summary),
 )
 
+# ---------------------------------------------------------------- threading
+# Tiled detection runs in threads. Two things had to be got right for that,
+# and both fail quietly enough to reach a classroom unnoticed, so they are
+# pinned here.
+print("\n== threaded tiled detection")
+
+check(
+    "a thread gets its own detector, never a shared one",
+    "threading.local()" in Path("recognition.py").read_text()
+    and "_detector_local" in Path("recognition.py").read_text(),
+    "sharing face_recognition's module-level detector segfaulted 11 runs in 12",
+)
+check(
+    "each tile is made contiguous before dlib sees it",
+    "ascontiguousarray" in Path("recognition.py").read_text(),
+    "passing slice views lost 44 of 197 back-row faces, silently",
+)
+class _Stub:
+    __name__ = "stub"
+
+    def face_locations(self, crop, number_of_times_to_upsample=1, model="hog"):
+        return []
+
+
+_saved_fr = recognition._fr
+recognition._fr = lambda: _Stub()
+try:
+    declined = recognition._thread_detector() is None
+finally:
+    recognition._fr = _saved_fr
+check(
+    "threading is declined when a stub replaces the real library",
+    declined,
+    "reaching past the stub to dlib would make detection untestable, and did",
+)
+check(
+    "one tile is never threaded",
+    recognition.detect_thread_count(1) == 1 and recognition.detect_thread_count(0) == 1,
+)
+check(
+    "DETECT_THREADS=1 turns threading off entirely",
+    recognition.DETECT_THREADS == 1 or recognition.detect_thread_count(8) > 1,
+)
+
+# The stub counts the tiles it is handed, so this proves the threaded and
+# serial paths cover exactly the same ground.
+class CountingStub:
+    __name__ = "stub"
+
+    def __init__(self):
+        self.seen = []
+
+    def face_locations(self, crop, number_of_times_to_upsample=1, model="hog"):
+        self.seen.append(crop.shape)
+        return []
+
+
+blank = np.zeros((2000, 3000, 3), dtype=np.uint8)
+expected = len(recognition.tile_windows(2000, 3000, 1200, 240))
+counted = []
+for threads in (1, 4):
+    stub = CountingStub()
+    saved = recognition._fr
+    recognition._fr = lambda: stub
+    saved_threads = recognition.DETECT_THREADS
+    recognition.DETECT_THREADS = threads
+    try:
+        recognition.detect_tiled(blank, tile=1200, overlap=240)
+    finally:
+        recognition._fr = saved
+        recognition.DETECT_THREADS = saved_threads
+    counted.append(len(stub.seen))
+check(
+    "every tile is searched whether threaded or not",
+    counted == [expected, expected],
+    f"{counted} tiles seen, expected {expected} each",
+)
+
 shutil.rmtree(WORK, ignore_errors=True)
 
 print(f"\n{CHECKS - FAILS}/{CHECKS} checks passed.")

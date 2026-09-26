@@ -138,17 +138,65 @@ auto-marked present, 18.5 s.**
 
 120 faces in one 12 MP photo, 4-core x86:
 
-| stage | serial | 4 worker processes |
-|-------|-------:|-------------------:|
-| detection (tiled, full resolution) | 9.0 s | 9.0 s |
-| encoding 120 faces | 27.1 s | 7.4 s |
-| **whole scan** | **36 s** | **18 s** |
+| stage | serial | now |
+|-------|-------:|----:|
+| decode | 0.2 s | 0.2 s |
+| detection (tiled, full resolution) | 9.7 s | **3.8 s** — 4 threads |
+| encoding 120 faces | 25 s | **5.0 s** — 4 processes |
+| **whole scan** | **36 s** | **8.0 s** |
 
 Measured end to end through `POST /api/scan` with 119 students enrolled:
-**18.5 s**, which matches the component timings above.
+**9.0 s on the first scan, 8.0 s on every scan after it** (the first pays for
+starting the encoding pool). Three photos of the same room, which is the
+coverage this document recommends: **23 s**, against 51 s before.
 
-dlib holds the GIL, so threads are worthless here — measured 1.02x on four
-threads. Only separate processes help. `SCAN_WORKERS` controls this:
+Nothing was traded away for it. Same 121 faces found, same 100 students
+identified, zero misidentifications — see *What the speed did not cost* below.
+
+### Detection is threaded; encoding cannot be
+
+These two look like the same problem and are not. Getting them the same way
+round is the difference between a 2x speedup and a segfault in a classroom.
+
+**Encoding needs separate processes.** Threads do not merely fail to help,
+they crash: `face_encodings` called concurrently segfaults the interpreter
+once enough faces are in flight. 16 jobs over 2 threads survived every time;
+118 jobs over 4 threads died 3 times out of 3.
+
+**Detection is threaded**, because dlib releases the GIL inside the HOG
+search — 9.7 s to 3.8 s on four cores, with no process to start and no 12 MP
+image to pickle. Two things had to be true first, and each one fails in its
+own quiet way:
+
+1. **Every thread needs its own `dlib.get_frontal_face_detector()`.**
+   `face_recognition` keeps one at module scope and shares it with every
+   caller. Calling that shared object from four threads segfaulted 11 runs out
+   of 12. Per-thread detectors: 8 out of 8, and every run since.
+
+2. **Every tile must be copied contiguous first.** A tile is a slice view into
+   the big photo, and dlib reads one of those wrongly when several threads do
+   it at once. It returned **153 boxes instead of 197** — reproducibly, and
+   every box it dropped was a ~36 px back-row face. No crash, no warning, just
+   the quiet disappearance of exactly the students this project exists to
+   find. `np.ascontiguousarray` per tile costs 4 MB and restores the count to
+   the serial result exactly.
+
+`halltest.py` pins both, and asserts the threaded path searches the same tiles
+as the serial one. `DETECT_THREADS=1` turns threading off if you ever need to.
+
+The first measurement taken here claimed 3.91x and was simply the one run in
+twelve that survived. A benchmark that crashes eleven times is not a
+benchmark; if you re-measure this, check the exit code.
+
+### The encoding pool is kept warm
+
+It used to be built and torn down for every photo, which threw away the ~2.4 s
+its four workers spend importing dlib and loading models. It is now created
+once and reused: 7.8 s cold against 6.4 s warm for the same work, and a
+teacher scanning three photos pays the startup once instead of three times.
+It is rebuilt automatically if a worker ever dies.
+
+`SCAN_WORKERS` controls the pool:
 
 * `0` (default) — automatic: up to four workers when there are at least
   `PARALLEL_MIN_FACES` (24) faces and more than one CPU.
@@ -158,9 +206,9 @@ threads. Only separate processes help. `SCAN_WORKERS` controls this:
 
 The pool uses the `forkserver` start method, not plain `fork`, because
 Gunicorn runs threaded workers by default and forking a threaded process can
-deadlock in the child. Starting it costs about 1.4 s, which a hall photo
-repays several times over. If the platform refuses to start processes the scan
-falls back to serial and says so in the log rather than failing.
+deadlock in the child. Starting it costs about 2.4 s, paid once per server
+process rather than once per photo. If the platform refuses to start processes
+the scan falls back to serial and says so in the log rather than failing.
 
 One sharp edge, handled rather than documented away: `forkserver` and `spawn`
 both **re-execute the program's `__main__` module in every worker**. That is
@@ -172,10 +220,55 @@ checks for that guard and quietly falls back to serial encoding when it is
 missing, so the worst case is slow rather than baffling. If you write your own
 script that scans photos, guard its entry point and you keep the speedup.
 
+### What the speed did not cost
+
+Every change above was checked against ground truth on the 120-student hall
+before it was kept.
+
+Threaded detection returns **exactly** the boxes serial detection returns —
+not "about the same", the identical set, verified five runs out of five. That
+is the whole reason for the contiguous copy in point 2 above; without it the
+counts quietly diverged.
+
+The one change that did alter results is `SMALL_FACE_JITTERS`, dropped from 2
+to 1:
+
+| | scan | found | auto-accepted | sent to review | wrong names |
+|---|---:|---:|---:|---:|---:|
+| `SMALL_FACE_JITTERS=1` | 8.0 s | 100/120 | 90 | 10 | **0** |
+| `SMALL_FACE_JITTERS=2` | 10.9 s | 100/120 | 97 | 3 | **0** |
+
+The same 100 students, and no misidentification either way. Averaging two
+jittered passes pulls distances in slightly, so seven more faces clear the
+auto-accept band instead of landing in review.
+
+One pass is the default because it is 28% faster and **exactly repeatable** —
+dlib only applies its random transform when asked for more than one pass, so
+rescanning a photo now returns an identical register. Two passes wobbled
+between 97 and 101 auto-accepts across nine runs of the same photograph.
+
+The cost is real and it is seven extra confirmation taps on a full hall. Set
+`SMALL_FACE_JITTERS=2` to buy them back for three seconds.
+
+### A note on the match threshold
+
+A sweep with 30 of the 120 students held out of the gallery — so any name
+given to one of them is a false positive — suggests `MATCH_DISTANCE` has some
+headroom above the current 0.52: recall kept climbing to 0.54 without adding a
+false positive beyond the one already present at 0.48.
+
+It has **not** been changed. That is one random split of one synthetic room,
+and a threshold that decides whether an absent student is marked present is
+not something to move on a single sample. `calibrate.py` exists for this and
+enforces a zero-false-positive policy; run it against a real labelled class
+before touching the default.
+
 ### What a hall needs from the host
 
 * **2 or more CPU cores and 2 GB RAM** for a 120-student room at a sensible
-  speed. One core works, at roughly 36 s per photo.
+  speed. Both detection and encoding scale with cores, so this is the single
+  thing most worth spending on: one core works, at roughly 36 s per photo,
+  against 8 s on four.
 * `GUNICORN_TIMEOUT` of at least 300 (already the default in
   `gunicorn.conf.py`) so a multi-photo scan is never killed mid-request.
 * `WEB_CONCURRENCY=1`, so the scan's worker processes get the cores rather
